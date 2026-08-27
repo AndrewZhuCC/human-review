@@ -40,6 +40,31 @@ function request(port, token, { method = "GET", route = "/", body = null } = {})
   });
 }
 
+/** Ack completes before the replacement long-poll writes its first heartbeat. */
+function acknowledge(port, token, file) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: `/api/poll?file=${encodeURIComponent(file)}&ack=1`,
+        headers: { "x-human-review-token": token },
+      },
+      (res) => {
+        res.once("data", () => {
+          res.destroy();
+          resolve();
+        });
+      }
+    );
+    req.on("error", (err) => {
+      if (err.code === "ECONNRESET") resolve();
+      else reject(err);
+    });
+    req.end();
+  });
+}
+
 test("isMarkdown matches only markdown extensions", () => {
   assert.equal(isMarkdown("/a/plan.md"), true);
   assert.equal(isMarkdown("/a/plan.markdown"), true);
@@ -55,6 +80,51 @@ test("renderMarkdownPage produces a full document from gfm source", () => {
   assert.match(html, /<strong>soon<\/strong>/);
   assert.match(html, /<table>/, "gfm tables render");
   assert.match(html, /<title>plan\.md<\/title>/);
+});
+
+test("renderMarkdownPage adds a review-only table of contents for h1-h3", () => {
+  const html = renderMarkdownPage(
+    "# Runtime Watchdog\n\n## Call Trace\n\n### 数据流\n\n#### Internal detail\n\n## Call Trace\n",
+    "/x/design.md"
+  );
+  const document = new JSDOM(html).window.document;
+  const toc = document.querySelector("nav.toc");
+  assert.ok(toc, "documents with headings get a table of contents");
+  assert.equal(toc.hasAttribute("data-eh-ui"), true, "the review SDK ignores the generated navigation");
+  assert.deepEqual(
+    [...toc.querySelectorAll("a")].map((element) => ({
+      text: element.textContent,
+      href: element.getAttribute("href"),
+      depth: element.parentElement.className,
+    })),
+    [
+      { text: "Runtime Watchdog", href: "#runtime-watchdog", depth: "depth-1" },
+      { text: "Call Trace", href: "#call-trace", depth: "depth-2" },
+      { text: "数据流", href: "#数据流", depth: "depth-3" },
+      { text: "Call Trace", href: "#call-trace-2", depth: "depth-2" },
+    ]
+  );
+  assert.equal(document.querySelector("h1").id, "runtime-watchdog");
+  assert.equal(document.querySelector("h3").id, "数据流");
+  assert.equal(document.querySelector("h4").id, "internal-detail", "deeper headings still get linkable anchors");
+  assert.equal(toc.querySelector('a[href="#internal-detail"]'), null, "h4 and deeper stay out of the compact sidebar");
+});
+
+test("renderMarkdownPage omits the table of contents when no headings exist", () => {
+  const html = renderMarkdownPage("A short paragraph without headings.", "/x/notes.md");
+  const document = new JSDOM(html).window.document;
+  assert.equal(document.querySelector("nav.toc"), null);
+  assert.equal(document.querySelector(".review-layout"), null);
+  assert.ok(document.querySelector("body > main"), "the original centered document layout remains");
+});
+
+test("table of contents labels stay text-only when headings contain markdown", () => {
+  const html = renderMarkdownPage("## **Bold** and [linked](https://example.com)\n", "/x/notes.md");
+  const document = new JSDOM(html).window.document;
+  const link = document.querySelector("nav.toc a");
+  assert.equal(link.textContent, "Bold and linked");
+  assert.equal(link.querySelectorAll("strong, a").length, 0, "inline formatting does not become nested navigation markup");
+  assert.equal(document.querySelector("main h2 strong").textContent, "Bold");
 });
 
 test("raw HTML in markdown is visible but never active", () => {
@@ -143,9 +213,13 @@ test("a markdown review is rendered, flagged, and never writable", async (t) => 
     const sent = await request(port, token, {
       method: "POST",
       route: `/api/page/${key}/send`,
-      body: { sessionId, note: "" },
+      body: { sessionId, note: "Keep the design concise." },
     });
     assert.equal(sent.status, 200);
+    const sentPage = JSON.parse(sent.raw).page;
+    assert.equal(sentPage.lastReview.overall_note, "Keep the design concise.");
+    assert.equal(sentPage.lastReview.comments[0].feedback, "Add a timeline.");
+    assert.ok(sentPage.lastReview.sent_at, "the history records when it was sent");
     const polled = await request(port, token, { route: `/api/poll?file=${encodeURIComponent(file)}` });
     const batch = JSON.parse(polled.raw);
     assert.equal(batch.status, "feedback");
@@ -153,6 +227,13 @@ test("a markdown review is rendered, flagged, and never writable", async (t) => 
     const page = batch.pages.find((p) => p.file === fs.realpathSync(file));
     assert.equal(page.comments[0].feedback, "Add a timeline.");
     assert.match(batch.next_step, /Markdown source/);
+
+    await acknowledge(port, token, file);
+    const afterAck = JSON.parse((await request(port, token, { route: `/api/page/${key}` })).raw);
+    assert.deepEqual(afterAck.comments, [], "ack clears the live comment queue");
+    assert.deepEqual(afterAck.edits, [], "ack clears the live edit queue");
+    assert.equal(afterAck.lastReview.comments[0].feedback, "Add a timeline.", "the last sent review remains visible after ack");
+    assert.equal(afterAck.lastReview.overall_note, "Keep the design concise.");
   });
 });
 

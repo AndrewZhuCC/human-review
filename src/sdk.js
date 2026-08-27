@@ -6,7 +6,7 @@
  * talks to the server — everything crosses to the chrome page by postMessage.
  */
 import { buildContext, findQuote } from "./anchor-text.js";
-import { hashClickAction, navigationHref } from "./click-target.js";
+import { hashClickAction, hashTargetId, navigationHref } from "./click-target.js";
 import { linkStyleFixup, listCommandFor, listStyleFixup, normalizeHref } from "./editing.js";
 import { keepBodyEditable, serializeDocument, UI_ATTR, MARK_ATTR } from "./serialize.js";
 
@@ -731,7 +731,23 @@ function boot() {
   document.addEventListener(
     "click",
     (event) => {
-      if (isOurs(event.target)) return;
+      // Review-only UI lives inside the artifact document but outside its
+      // editable content. Browsers do not reliably follow anchors inside a
+      // contenteditable body, so generated navigation (Markdown's TOC) needs
+      // an explicit in-document jump.
+      if (isOurs(event.target)) {
+        const href = navigationHref(event.target);
+        if (href.startsWith("#")) {
+          event.preventDefault();
+          event.stopPropagation();
+          const action = hashClickAction(href, location.hash);
+          if (action.kind === "navigate") location.hash = action.hash;
+          const id = hashTargetId(href);
+          const el = document.getElementById(id) || document.getElementsByName(id)[0];
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        return;
+      }
       const modified = event.metaKey || event.ctrlKey;
       const href = navigationHref(event.target);
 

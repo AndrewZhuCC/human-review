@@ -257,11 +257,12 @@ export function createServer() {
 
     const hasMarkdown = pages.some((p) => p.kind === "file" && isMarkdown(p.file));
     const hasUrl = pages.some((p) => p.kind === "url");
+    const sentAt = new Date().toISOString();
     const batch = {
       status: "feedback",
       pages: pages.map(({ kind, file, url, comments, edits }) => ({ kind, file, ...(url ? { url } : {}), comments, edits })),
       overall_note: note || "",
-      sent_at: new Date().toISOString(),
+      sent_at: sentAt,
       next_step:
         "Apply this feedback. Each entry in `pages` names the reviewed file or localhost URL. Items under `edits` are " +
         "changes the human already made: `after` is their exact new wording, so carry it across verbatim, and " +
@@ -280,6 +281,22 @@ export function createServer() {
         "When every page is updated, run the same poll command again with --ack to clear this " +
         "batch and wait for more.",
     };
+
+    // Keep one durable, read-only snapshot per page so the reviewer can recall
+    // what they asked for after the agent acknowledges and the live queue clears.
+    for (const page of pages) {
+      store.setLastReview(page.key, {
+        comments: page.comments,
+        edits: page.edits,
+        overall_note: note || "",
+        sent_at: sentAt,
+      });
+    }
+    // An overall note can be sent without page-specific feedback. Anchor that
+    // history to the entry page so it still has somewhere visible to live.
+    if (!pages.length && note) {
+      store.setLastReview(session.entryKey, { comments: [], edits: [], overall_note: note, sent_at: sentAt });
+    }
 
     const record = {
       batch,
@@ -449,6 +466,7 @@ export function createServer() {
       feedbackOnly: page.kind === "url",
       comments: page.comments,
       edits: page.edits,
+      lastReview: page.lastReview || null,
       canRevert: page.kind !== "url" && typeof page.pristine === "string" && page.pristine.length > 0,
       pollCommand: `${cliInvocation} poll ${shellQuote(pollTarget)}`,
     };

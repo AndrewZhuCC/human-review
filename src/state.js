@@ -31,7 +31,7 @@ export function atomicWrite(file, data) {
  *
  * Shape:
  *   {
- *     pages:   { <key>: { key, file, pristine, comments[], edits[], updatedAt } },
+ *     pages:   { <key>: { key, file, pristine, comments[], edits[], lastReview, updatedAt } },
  *     batches: { <entryKey>: { batch, cleanup, updatedAt } },
  *   }
  *
@@ -230,6 +230,13 @@ export class Store {
   clearEdits(key) {
     return this.update(key, (page) => {
       page.edits = [];
+    });
+  }
+
+  /** Keep the most recently sent requirements visible after acknowledgement. */
+  setLastReview(key, review) {
+    return this.update(key, (page) => {
+      page.lastReview = review;
     });
   }
 

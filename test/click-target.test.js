@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hashClickAction, navigationHref } from "../src/click-target.js";
+import { hashClickAction, hashTargetId, navigationHref } from "../src/click-target.js";
 
 function target({ link = null, control = null } = {}) {
   return {
@@ -40,4 +40,10 @@ test("hashClickAction matches encoded and decoded forms of the same hash", () =>
 test("hashClickAction survives malformed percent escapes", () => {
   assert.deepEqual(hashClickAction("#%", ""), { kind: "navigate", hash: "#%" });
   assert.deepEqual(hashClickAction("#%", "#%"), { kind: "scroll", id: "%" });
+});
+
+test("hashTargetId decodes TOC anchors for explicit scrolling", () => {
+  assert.equal(hashTargetId("#%E6%95%B0%E6%8D%AE%E6%B5%81"), "数据流");
+  assert.equal(hashTargetId("#call-trace"), "call-trace");
+  assert.equal(hashTargetId("#%"), "%");
 });

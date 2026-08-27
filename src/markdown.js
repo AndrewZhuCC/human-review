@@ -9,13 +9,37 @@ export const isMarkdown = (file) => /\.(md|markdown)$/i.test(file);
  */
 const STYLE = `
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     margin: 0; background: #fdfcfa; color: #1b1a16;
     font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  main { max-width: 72ch; margin: 0 auto; padding: 48px 28px 96px; }
-  h1, h2, h3, h4 { line-height: 1.25; margin: 1.6em 0 .5em; }
+  .review-layout { width: 100%; }
+  .review-layout > main { max-width: 72ch; margin: 0 auto; padding: 48px 28px 96px; }
+  body > main { max-width: 72ch; margin: 0 auto; padding: 48px 28px 96px; }
+  .toc {
+    position: fixed; top: 0; bottom: 0; left: 24px; width: min(240px, calc((100vw - 72ch) / 2 - 52px));
+    min-width: 160px; padding: 48px 0 40px; overflow: auto; color: #6b6862;
+  }
+  .toc-title {
+    margin: 0 0 12px; color: #1b1a16; font-size: 12px; font-weight: 650;
+    letter-spacing: .08em; text-transform: uppercase;
+  }
+  .toc ol { margin: 0; padding: 0; list-style: none; }
+  .toc li { margin: 1px 0; }
+  .toc a {
+    display: block; padding: 4px 8px; border-radius: 5px; color: inherit;
+    font-size: 13px; line-height: 1.35; text-decoration: none;
+  }
+  .toc a:hover { background: #f2f0ea; color: #1b1a16; }
+  .toc .depth-2 a { padding-left: 20px; }
+  .toc .depth-3 a { padding-left: 32px; color: #88847b; }
+  h1, h2, h3, h4 { line-height: 1.25; margin: 1.6em 0 .5em; scroll-margin-top: 20px; }
+  h1:target, h2:target, h3:target, h4:target, h5:target, h6:target {
+    animation: target-flash 1.2s ease-out;
+  }
+  @keyframes target-flash { from { background: #fff0a8; } to { background: transparent; } }
   h1 { font-size: 2em; margin-top: .4em; }
   h2 { font-size: 1.45em; border-bottom: 1px solid #eceae3; padding-bottom: .25em; }
   h3 { font-size: 1.15em; }
@@ -34,6 +58,9 @@ const STYLE = `
   th { background: #f7f5f0; }
   img { max-width: 100%; height: auto; }
   hr { border: none; border-top: 1px solid #eceae3; margin: 2.2em 0; }
+  @media (max-width: 1160px) {
+    .toc { display: none; }
+  }
 `;
 
 const escapeHtml = (value) =>
@@ -41,6 +68,25 @@ const escapeHtml = (value) =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+
+const escapeAttribute = (value) => escapeHtml(value).replace(/"/g, "&quot;");
+
+function slugger() {
+  const used = new Map();
+  return (text) => {
+    const base =
+      String(text || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim()
+        .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+        .replace(/^-+|-+$/g, "") || "section";
+    const count = (used.get(base) || 0) + 1;
+    used.set(base, count);
+    return count === 1 ? base : `${base}-${count}`;
+  };
+}
 
 function safeUrl(value, { image = false } = {}) {
   const url = String(value || "").trim();
@@ -56,23 +102,51 @@ function safeUrl(value, { image = false } = {}) {
 
 // Markdown can contain arbitrary HTML. Show that source as text so event
 // handlers, embeds, SVG, and future browser features can never become active.
-const INERT_RENDERER = new Renderer();
-INERT_RENDERER.html = ({ text }) => escapeHtml(text);
-INERT_RENDERER.link = function (token) {
-  const href = safeUrl(token.href);
-  if (!href) return this.parser.parseInline(token.tokens);
-  return Renderer.prototype.link.call(this, { ...token, href });
-};
-INERT_RENDERER.image = function (token) {
-  const href = safeUrl(token.href, { image: true });
-  if (!href) return escapeHtml(token.text || "");
-  return Renderer.prototype.image.call(this, { ...token, href });
-};
+function createRenderer(headings) {
+  const renderer = new Renderer();
+  const nextSlug = slugger();
+  renderer.html = ({ text }) => escapeHtml(text);
+  renderer.link = function (token) {
+    const href = safeUrl(token.href);
+    if (!href) return this.parser.parseInline(token.tokens);
+    return Renderer.prototype.link.call(this, { ...token, href });
+  };
+  renderer.image = function (token) {
+    const href = safeUrl(token.href, { image: true });
+    if (!href) return escapeHtml(token.text || "");
+    return Renderer.prototype.image.call(this, { ...token, href });
+  };
+  renderer.heading = function ({ tokens, depth }) {
+    const html = this.parser.parseInline(tokens);
+    const text = this.parser.parseInline(tokens, this.parser.textRenderer).trim();
+    const id = nextSlug(text);
+    if (depth <= 3) headings.push({ depth, id, text });
+    return `<h${depth} id="${escapeAttribute(id)}">${html}</h${depth}>\n`;
+  };
+  return renderer;
+}
+
+function renderToc(headings) {
+  if (!headings.length) return "";
+  const items = headings
+    .map(
+      ({ depth, id, text }) =>
+        `<li class="depth-${depth}"><a href="#${escapeAttribute(id)}">${escapeHtml(text)}</a></li>`
+    )
+    .join("\n");
+  return `<nav class="toc" aria-label="Table of contents" data-eh-ui>
+<p class="toc-title">Contents</p>
+<ol>${items}</ol>
+</nav>`;
+}
 
 /** Render a Markdown file into a standalone review page. */
 export function renderMarkdownPage(mdText, file) {
-  const body = marked.parse(mdText, { gfm: true, async: false, renderer: INERT_RENDERER });
+  const headings = [];
+  const body = marked.parse(mdText, { gfm: true, async: false, renderer: createRenderer(headings) });
+  const toc = renderToc(headings);
   const title = path.basename(file);
+  const content = toc ? `<div class="review-layout">${toc}<main>${body}</main></div>` : `<main>${body}</main>`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -81,7 +155,7 @@ export function renderMarkdownPage(mdText, file) {
 <title>${title.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</title>
 <style>${STYLE}</style>
 </head>
-<body><main>${body}</main></body>
+<body>${content}</body>
 </html>
 `;
 }

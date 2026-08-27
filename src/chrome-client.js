@@ -264,6 +264,54 @@ function render() {
     renderSave();
   }
 
+  // --- most recently sent requirements (read-only, not part of this batch)
+  const history = page.lastReview;
+  const historyBox = $("historyBox");
+  historyBox.hidden = !history;
+  if (history) {
+    const sentAt = Date.parse(history.sent_at || "");
+    $("historyWhen").textContent = Number.isFinite(sentAt) ? ago(sentAt) : "";
+    const content = $("historyContent");
+    content.textContent = "";
+
+    const appendHistory = (kind, title, body, quote = "") => {
+      const item = document.createElement("div");
+      item.className = "history-item";
+      const head = document.createElement("div");
+      head.className = "history-item-head";
+      const badge = document.createElement("span");
+      badge.className = "history-kind";
+      badge.textContent = kind;
+      const label = document.createElement("span");
+      label.className = "history-label";
+      label.textContent = title;
+      head.append(badge, label);
+      item.append(head);
+      if (quote) {
+        const quoted = document.createElement("p");
+        quoted.className = "history-quote";
+        quoted.textContent = tidy(quote, 180);
+        item.append(quoted);
+      }
+      if (body) {
+        const text = document.createElement("p");
+        text.className = "history-body";
+        text.textContent = body;
+        item.append(text);
+      }
+      content.append(item);
+    };
+
+    if (history.overall_note) appendHistory("Note", "Overall note", history.overall_note);
+    for (const comment of history.comments || []) {
+      appendHistory("Comment", comment.kind === "element" ? "Element" : "Selection", comment.feedback, comment.quote);
+    }
+    for (const edit of history.edits || []) {
+      const body = edit.kind === "deleted" ? "Deleted" : edit.kind === "moved" ? "Moved" : edit.after || "Edited";
+      appendHistory("Edit", edit.label || "Document", body, edit.before);
+    }
+  }
+
   // --- pages you left feedback on but are not looking at
   const others = state.others || [];
   const othersBox = $("othersBox");
@@ -652,10 +700,11 @@ $("composeText").addEventListener("keydown", (event) => {
 
 $("send").addEventListener("click", async () => {
   try {
-    await api(`/api/page/${state.key}/send`, {
+    const result = await api(`/api/page/${state.key}/send`, {
       method: "POST",
       body: JSON.stringify({ sessionId: state.sessionId, note: $("note").value.trim() }),
     });
+    if (result.page) state.page = result.page;
     $("note").value = "";
     state.sent = true;
     render();

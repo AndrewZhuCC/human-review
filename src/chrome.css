@@ -333,6 +333,28 @@ body.collapsed .handle { right: 0; }
 }
 
 #editsBox { margin-top: 20px; animation: rise 140ms ease-out; }
+.history-box { margin-top: 20px; animation: rise 140ms ease-out; }
+.history-box details { border-top: 1px solid var(--hair-2); padding-top: 12px; }
+.history-box summary {
+  display: flex; align-items: baseline; gap: 7px; padding: 0 4px 9px;
+  list-style: none; cursor: pointer; user-select: none;
+}
+.history-box summary::-webkit-details-marker { display: none; }
+.history-box summary::after { content: "›"; margin-left: auto; color: var(--faint); transition: transform 120ms ease; }
+.history-box details[open] summary::after { transform: rotate(90deg); }
+.history-content { display: flex; flex-direction: column; gap: 7px; }
+.history-item { padding: 10px 11px; border: 1px solid var(--card-border); border-radius: 8px; background: var(--card); }
+.history-item-head { display: flex; align-items: center; gap: 7px; }
+.history-kind {
+  padding: 1px 6px; border-radius: 999px; background: var(--chip); color: var(--faint-2);
+  font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+}
+.history-label { min-width: 0; overflow: hidden; color: var(--mute-2); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.history-quote {
+  margin: 7px 0 0; padding-left: 8px; border-left: 2px solid var(--hair);
+  color: var(--faint-2); font-size: 11px; font-style: italic; line-height: 1.4;
+}
+.history-body { margin: 7px 0 0; color: var(--txt); font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
 .save-line { display: flex; align-items: center; gap: 7px; padding: 0 4px 9px; color: var(--faint-2); font-size: 11px; }
 .save-line.saving { color: var(--mute); }
 .save-line.failed { color: var(--danger); }

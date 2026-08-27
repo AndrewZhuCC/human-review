@@ -65,6 +65,26 @@ test("clearSent removes only the delivered comments", () => {
   assert.deepEqual(store.page(key).edits, []);
 });
 
+test("last sent review survives acknowledgement and a store restart", () => {
+  const store = new Store();
+  const { key } = store.openPage(page("review-history.html", "<p>x</p>"), "<p>x</p>");
+  const review = {
+    comments: [{ id: "c1", kind: "selection", quote: "x", feedback: "Make this clearer." }],
+    edits: [{ label: "Body", kind: "edited", before: "x", after: "clearer" }],
+    overall_note: "Keep the tone concise.",
+    sent_at: "2026-08-26T00:00:00.000Z",
+  };
+  store.addComment(key, review.comments[0]);
+  store.addEdit(key, "Body", "edited", "x", "clearer");
+  store.setLastReview(key, review);
+  store.clearSent(key, ["c1"], Date.now() + 1);
+
+  assert.deepEqual(store.page(key).comments, []);
+  assert.deepEqual(store.page(key).edits, []);
+  assert.deepEqual(store.page(key).lastReview, review);
+  assert.deepEqual(new Store().page(key).lastReview, review, "history remains durable after restart");
+});
+
 test("pages are independent of one another", () => {
   const store = new Store();
   const a = store.openPage(page("p1.html", "<p>a</p>"), "<p>a</p>");
