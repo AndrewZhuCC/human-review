@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 
 // Bump this when the CLI and detached server no longer share the same request
 // contract. A new CLI must not silently reuse an older background server.
-export const SERVER_PROTOCOL = 11;
+export const SERVER_PROTOCOL = 16;
 
 export function stateDir() {
   const override = process.env.HUMAN_REVIEW_STATE_DIR;
@@ -61,16 +62,42 @@ export function pageKey(file) {
   return createHash("sha256").update(real).digest("hex").slice(0, 16);
 }
 
-/** Stable identity for either an existing file target or a localhost URL. */
+/** Resolve a directory inside a Git working tree to its real repository root. */
+export function gitRoot(target) {
+  const resolved = path.resolve(String(target || "."));
+  let stat;
+  try {
+    stat = fs.statSync(resolved);
+  } catch {
+    return null;
+  }
+  if (!stat.isDirectory()) return null;
+  const result = spawnSync("git", ["-C", resolved, "rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0 || !result.stdout.trim()) return null;
+  try {
+    return fs.realpathSync(result.stdout.trim());
+  } catch {
+    return path.resolve(result.stdout.trim());
+  }
+}
+
+/** Stable identity for a file, localhost URL, or Git working tree. */
 export function targetKey(target) {
   const url = localUrl(target);
-  if (!url) return pageKey(target);
-  return createHash("sha256").update(`url:${url}`).digest("hex").slice(0, 16);
+  if (url) return createHash("sha256").update(`url:${url}`).digest("hex").slice(0, 16);
+  const repo = gitRoot(target);
+  if (repo) return createHash("sha256").update(`git:${repo}`).digest("hex").slice(0, 16);
+  return pageKey(target);
 }
 
 export function canonicalTarget(target) {
   const url = localUrl(target);
-  return url ? { kind: "url", value: url } : { kind: "file", value: realFile(target) };
+  if (url) return { kind: "url", value: url };
+  const repo = gitRoot(target);
+  return repo ? { kind: "git", value: repo } : { kind: "file", value: realFile(target) };
 }
 
 export function realFile(file) {

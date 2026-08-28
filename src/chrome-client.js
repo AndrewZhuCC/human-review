@@ -142,6 +142,7 @@ function render() {
   const comments = page.comments || [];
   const edits = page.edits || [];
 
+  $("gitBox").hidden = page.kind !== "git";
   $("count").textContent = String(comments.length);
   $("empty").hidden = comments.length > 0 || !!state.compose;
 
@@ -411,6 +412,11 @@ function render() {
 
 function renderSave() {
   const line = $("saveLine");
+  if (state.page && state.page.kind === "git") {
+    line.className = "save-line dynamic";
+    $("saveText").textContent = "Git changes — comments go to the agent; the diff is read-only";
+    return;
+  }
   if (state.page && state.page.kind === "url") {
     line.className = "save-line dynamic";
     $("saveText").textContent = "Localhost page — your direct edits go to the agent for source updates";
@@ -592,6 +598,13 @@ window.addEventListener("message", async (event) => {
   switch (msg.type) {
     case "eh:ready": {
       toFrame({ type: "eh:anchors", comments: state.page ? state.page.comments : [] });
+      if (state.page?.git) {
+        let mode = "tree";
+        try {
+          mode = localStorage.getItem("human-review:git-nav-mode") || "tree";
+        } catch {}
+        toFrame({ type: "eh:gitNavMode", mode });
+      }
       if (state.reloading) {
         toFrame({ type: "eh:restoreScroll", x: state.scroll.x, y: state.scroll.y });
         state.reloading = false;
@@ -680,6 +693,11 @@ window.addEventListener("message", async (event) => {
       break;
     case "eh:scroll":
       state.scroll = { x: msg.x, y: msg.y };
+      break;
+    case "eh:gitNavMode":
+      try {
+        localStorage.setItem("human-review:git-nav-mode", msg.mode === "list" ? "list" : "tree");
+      } catch {}
       break;
     case "eh:external":
       window.open(msg.href, "_blank", "noopener");

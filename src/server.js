@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { atomicWrite, Store, resolveAsset } from "./state.js";
 import { injectSdk, stripSdk } from "./html-transform.js";
 import { isMarkdown, renderMarkdownPage } from "./markdown.js";
+import { collectGitChanges, gitChangeFingerprintAsync, renderGitReview } from "./git-review.js";
 import { canonicalTarget, ensureStateDir, localUrl, SERVER_PROTOCOL, serverPath, stateDir, targetKey } from "./paths.js";
 import { invocation, shellQuote } from "./setup.js";
 
@@ -134,6 +135,11 @@ export function createServer() {
     return [...sessions.values()].filter((s) => s.entryKey === entryKey);
   }
 
+  function reusableSession(entryKey) {
+    const now = Date.now();
+    return sessionsForEntry(entryKey).find((session) => session.clients.size > 0 || now - session.lastSeen < 15000) || null;
+  }
+
   function emit(session, event, data) {
     for (const res of session.clients) {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data || {})}\n\n`);
@@ -159,11 +165,39 @@ export function createServer() {
 
   // ------------------------------------------------------------- file watch
 
-  function watchPage(key) {
-    if (watched.has(key)) return;
+  async function watchPage(key) {
+    const existingWatch = watched.get(key);
+    if (existingWatch) return existingWatch.ready;
     const page = store.page(key);
     if (!page || page.kind === "url") return;
-    watched.set(key, { file: page.file });
+    if (page.kind === "git") {
+      let previous = null;
+      let running = false;
+      const check = async () => {
+        if (running) return;
+        running = true;
+        try {
+          const current = await gitChangeFingerprintAsync(page.repo);
+          if (previous !== null && current !== previous) {
+            for (const session of sessionsForKey(key)) emit(session, "reload", { key });
+          }
+          previous = current;
+        } catch {
+          // A transient Git failure should not tear down the review session.
+        } finally {
+          running = false;
+        }
+      };
+      const ready = check();
+      const entry = { kind: "git", repo: page.repo, timer: null, ready };
+      watched.set(key, entry);
+      await ready;
+      const timer = setInterval(() => void check(), 1200);
+      timer.unref();
+      entry.timer = timer;
+      return;
+    }
+    watched.set(key, { kind: "file", file: page.file, ready: Promise.resolve() });
 
     fs.watchFile(page.file, { interval: WATCH_INTERVAL_MS }, () => {
       let html = "";
@@ -184,7 +218,7 @@ export function createServer() {
   function writePage(key, html) {
     const page = store.page(key);
     if (!page) throw new Error("unknown page");
-    if (page.kind === "url") throw new Error("localhost pages are applied through their source files");
+    if (page.kind !== "file") throw new Error(page.kind === "git" ? "Git reviews are read-only" : "localhost pages are applied through their source files");
     const clean = stripSdk(html);
     atomicWrite(page.file, clean);
     lastWritten.set(key, hash(clean));
@@ -211,11 +245,13 @@ export function createServer() {
       const page = store.page(key);
       if (!page) continue;
       if (!page.comments.length && !page.edits.length) continue;
+      const target = pageTarget(page);
       out.push({
         key,
-        kind: page.kind === "url" ? "url" : "file",
-        file: page.kind === "url" ? page.url : page.file,
+        kind: page.kind,
+        file: target,
         url: page.kind === "url" ? page.url : undefined,
+        repo: page.kind === "git" ? page.repo : undefined,
         comments: page.comments.map((c) => ({
           id: c.id,
           kind: c.kind,
@@ -257,10 +293,18 @@ export function createServer() {
 
     const hasMarkdown = pages.some((p) => p.kind === "file" && isMarkdown(p.file));
     const hasUrl = pages.some((p) => p.kind === "url");
+    const hasGit = pages.some((p) => p.kind === "git");
     const sentAt = new Date().toISOString();
     const batch = {
       status: "feedback",
-      pages: pages.map(({ kind, file, url, comments, edits }) => ({ kind, file, ...(url ? { url } : {}), comments, edits })),
+      pages: pages.map(({ kind, file, url, repo, comments, edits }) => ({
+        kind,
+        file,
+        ...(url ? { url } : {}),
+        ...(repo ? { repo } : {}),
+        comments,
+        edits,
+      })),
       overall_note: note || "",
       sent_at: sentAt,
       next_step:
@@ -277,6 +321,10 @@ export function createServer() {
             "and apply every exact edit or deletion there; never try to write the rendered HTML response back to the app. " +
             "When an edit includes `staged_assets`, copy each local image into the app's appropriate asset folder, replace its " +
             "temporary preview URL in `after_html`, and preserve the image at the user's insertion point. "
+          : "") +
+        (hasGit
+          ? "Git review comments carry `anchor.git` with repo-relative path, side, old/new line numbers, hunk header, and line text. " +
+            "Use that structured context to inspect and update the working tree; the diff page refreshes automatically after source changes. "
           : "") +
         "Comments may be change requests, questions, or discussion. Use your judgment: update the source, reply directly, do both, or neither when appropriate. " +
         `To answer one comment in the review page, run \`${cliInvocation} reply <target> <comment-id> --message <text>\`; use \`overall\` instead of a comment id to answer the Overall note, and use that page's file or URL as <target>. ` +
@@ -450,25 +498,33 @@ export function createServer() {
   // from the review shell, so its SDK module needs CORS to load.
   const CORS = { "access-control-allow-origin": "*" };
 
+  function pageTarget(page) {
+    if (!page) return "";
+    return page.kind === "url" ? page.url : page.kind === "git" ? page.repo : page.file;
+  }
+
   function pageState(key, session) {
     const page = store.page(key);
     if (!page) return null;
     // The entry target is what the agent polls, even after navigating elsewhere.
     const entry = session ? store.page(session.entryKey) : null;
-    const currentTarget = page.kind === "url" ? page.url : page.file;
-    const pollTarget = entry ? (entry.kind === "url" ? entry.url : entry.file) : currentTarget;
+    const currentTarget = pageTarget(page);
+    const pollTarget = pageTarget(entry) || currentTarget;
+    const isGit = page.kind === "git";
+    const filename = page.kind === "url" ? new URL(page.url).pathname || page.url : path.basename(currentTarget);
     return {
       key: page.key,
-      kind: page.kind === "url" ? "url" : "file",
+      kind: page.kind,
       file: currentTarget,
       ...(page.kind === "url" ? { url: page.url } : {}),
-      filename: page.kind === "url" ? new URL(page.url).pathname || page.url : path.basename(page.file),
-      markdown: page.kind !== "url" && isMarkdown(page.file),
-      feedbackOnly: page.kind === "url",
+      ...(isGit ? { repo: page.repo, git: true } : {}),
+      filename,
+      markdown: page.kind === "file" && isMarkdown(page.file),
+      feedbackOnly: page.kind === "url" || isGit,
       comments: page.comments,
       edits: page.edits,
       lastReview: page.lastReview || null,
-      canRevert: page.kind !== "url" && typeof page.pristine === "string" && page.pristine.length > 0,
+      canRevert: page.kind === "file" && typeof page.pristine === "string" && page.pristine.length > 0,
       pollCommand: `${cliInvocation} poll ${shellQuote(pollTarget)}`,
     };
   }
@@ -507,6 +563,7 @@ export function createServer() {
       if (route === "/chrome.js") return serveFile(res, path.join(here, "chrome-client.js"), CORS);
       if (route === "/chrome-session.js") return serveFile(res, path.join(here, "chrome-session.js"), CORS);
       if (route === "/sdk.js") return serveFile(res, path.join(here, "sdk.js"), CORS);
+      if (route === "/git-client.js") return serveFile(res, path.join(here, "git-client.js"), CORS);
       if (route === "/editing.js") return serveFile(res, path.join(here, "editing.js"), CORS);
       if (route === "/anchor-text.js") return serveFile(res, path.join(here, "anchor-text.js"), CORS);
       if (route === "/frame-policy.js") return serveFile(res, path.join(here, "frame-policy.js"), CORS);
@@ -517,21 +574,29 @@ export function createServer() {
       if (route === "/api/session" && req.method === "POST") {
         const body = await readBody(req);
         const target = canonicalTarget(body.target || body.file || "");
+        const existing = reusableSession(targetKey(target.value));
+        if (existing) {
+          existing.lastSeen = Date.now();
+          return json(res, 200, { sessionId: existing.id, key: existing.entryKey, path: `/s/${existing.id}`, reused: true });
+        }
         let page;
         if (target.kind === "url") {
           // Fail during open with a useful message rather than opening a blank review.
           await fetchLocalPage(target.value);
           page = store.openUrl(target.value);
+        } else if (target.kind === "git") {
+          collectGitChanges(target.value);
+          page = store.openGit(target.value);
         } else {
           if (!fs.existsSync(target.value)) return json(res, 404, { error: `File not found: ${target.value}` });
           const html = fs.readFileSync(target.value, "utf8");
           page = store.openPage(target.value, stripSdk(html));
           lastWritten.set(page.key, hash(stripSdk(html)));
         }
-        watchPage(page.key);
+        await watchPage(page.key);
         const id = uid("s");
         sessions.set(id, { id, entryKey: page.key, activeKey: page.key, visited: new Set([page.key]), clients: new Set(), lastSeen: Date.now() });
-        return json(res, 200, { sessionId: id, key: page.key, path: `/s/${id}` });
+        return json(res, 200, { sessionId: id, key: page.key, path: `/s/${id}`, reused: false });
       }
 
       // --- the chrome page
@@ -573,6 +638,14 @@ export function createServer() {
               res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
               return res.end(`Could not load ${page.url}: ${err.message}`);
             }
+          } else if (page.kind === "git") {
+            try {
+              html = renderGitReview(page.repo).html;
+              sdkOptions = { src: `/git-client.js?key=${encodeURIComponent(key)}` };
+            } catch (err) {
+              res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+              return res.end(`Could not render Git changes: ${err.message}`);
+            }
           } else {
             try {
               html = fs.readFileSync(page.file, "utf8");
@@ -585,6 +658,10 @@ export function createServer() {
           }
           res.writeHead(200, { "content-type": MIME[".html"], "cache-control": "no-store" });
           return res.end(injectSdk(html, key, sdkOptions));
+        }
+        if (page.kind === "git") {
+          res.writeHead(404, { "content-type": "text/plain" });
+          return res.end("Git review assets are embedded in the diff page.");
         }
         if (page.kind === "url") {
           const stagedPrefix = "__human_review_paste__/";
@@ -653,8 +730,8 @@ export function createServer() {
         // The file as it sits on disk, so the SDK can tell whether the page's
         // own scripts have already rewritten the live DOM.
         if (action === "raw" && req.method === "GET") {
-          if (store.page(key).kind === "url") {
-            return json(res, 400, { error: "localhost pages do not have a writable raw file" });
+          if (store.page(key).kind !== "file") {
+            return json(res, 400, { error: store.page(key).kind === "git" ? "Git reviews do not have a writable raw file" : "localhost pages do not have a writable raw file" });
           }
           let html = "";
           try {
@@ -743,6 +820,7 @@ export function createServer() {
         // reviews stage them privately until the agent moves them into source.
         if (action === "asset" && req.method === "POST") {
           const page = store.page(key);
+          if (page.kind === "git") return json(res, 400, { error: "Git reviews do not accept pasted assets" });
           const type = String(url.searchParams.get("type") || "");
           const ext = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" }[type];
           if (!ext) return json(res, 400, { error: `unsupported image type: ${type || "unknown"}` });
@@ -773,8 +851,9 @@ export function createServer() {
         if (action === "save" && req.method === "POST") {
           const page = store.page(key);
           // Rendered sources must never be overwritten with serialized browser HTML.
-          if (page.kind === "url" || isMarkdown(page.file)) {
-            return json(res, 400, { error: page.kind === "url" ? "localhost edits must be applied to app source" : "markdown pages are feedback-only" });
+          if (page.kind !== "file" || isMarkdown(page.file)) {
+            const error = page.kind === "git" ? "Git reviews are read-only" : page.kind === "url" ? "localhost edits must be applied to app source" : "markdown pages are feedback-only";
+            return json(res, 400, { error });
           }
           const body = await readBody(req);
           if (typeof body.html !== "string" || !body.html.trim()) {
@@ -804,7 +883,7 @@ export function createServer() {
 
         if (action === "revert" && req.method === "POST") {
           const page = store.page(key);
-          if (page.kind === "url") return json(res, 400, { error: "localhost pages have no directly writable file to revert" });
+          if (page.kind !== "file") return json(res, 400, { error: page.kind === "git" ? "Git reviews have no file snapshot to revert" : "localhost pages have no directly writable file to revert" });
           if (!page.pristine) return json(res, 400, { error: "nothing to revert to" });
           writePage(key, page.pristine);
           store.clearEdits(key);
@@ -864,6 +943,7 @@ export function createServer() {
         const body = await readBody(req);
         const from = store.page(session.activeKey);
         if (!from) return json(res, 404, { error: "unknown page" });
+        if (from.kind === "git") return json(res, 400, { error: "Git review navigation stays within the diff page" });
         if (from.kind === "url") {
           const nextUrl = new URL(String(body.href || ""), from.url).href;
           const target = canonicalTarget(nextUrl);
@@ -881,7 +961,7 @@ export function createServer() {
         const html = fs.readFileSync(targetFile, "utf8");
         const page = store.openPage(targetFile, stripSdk(html));
         lastWritten.set(page.key, hash(stripSdk(html)));
-        watchPage(page.key);
+        await watchPage(page.key);
         session.activeKey = page.key;
         session.visited.add(page.key);
         return json(res, 200, { key: page.key, page: pageState(page.key) });
@@ -962,7 +1042,8 @@ export function createServer() {
     for (const [key, entry] of watched) {
       const referenced = [...sessions.values()].some((s) => s.visited.has(key));
       if (!referenced) {
-        fs.unwatchFile(entry.file);
+        if (entry.kind === "git") clearInterval(entry.timer);
+        else fs.unwatchFile(entry.file);
         watched.delete(key);
         lastWritten.delete(key);
       }
@@ -977,7 +1058,10 @@ export function createServer() {
 
   const dispose = () => {
     clearInterval(sweep);
-    for (const entry of watched.values()) fs.unwatchFile(entry.file);
+    for (const entry of watched.values()) {
+      if (entry.kind === "git") clearInterval(entry.timer);
+      else fs.unwatchFile(entry.file);
+    }
     watched.clear();
     server.close();
   };

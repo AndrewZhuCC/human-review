@@ -65,8 +65,9 @@ export class Store {
   prune() {
     const now = Date.now();
     for (const [key, page] of Object.entries(this.data.pages)) {
-      const missingFile = page.kind !== "url" && !fs.existsSync(page.file);
-      if (!fresh(page, now) || missingFile) {
+      const missingFile = page.kind === "file" && !fs.existsSync(page.file);
+      const missingRepo = page.kind === "git" && !fs.existsSync(page.repo);
+      if (!fresh(page, now) || missingFile || missingRepo) {
         delete this.data.pages[key];
         delete this.data.batches[key];
       }
@@ -126,6 +127,32 @@ export class Store {
     if (!existing || typeof pristine === "string") {
       page.pristine = typeof pristine === "string" ? pristine : page.pristine;
     }
+    page.updatedAt = Date.now();
+    this.data.pages[key] = page;
+    this.save();
+    return page;
+  }
+
+  /** Register a Git working tree. Its rendered diff is always read-only. */
+  openGit(repo) {
+    const target = canonicalTarget(repo);
+    if (target.kind !== "git") throw new Error("Expected a Git working tree.");
+    const key = targetKey(target.value);
+    const existing = this.data.pages[key];
+    const page = existing || {
+      key,
+      kind: "git",
+      repo: target.value,
+      comments: [],
+      edits: [],
+      updatedAt: 0,
+    };
+    page.kind = "git";
+    page.repo = target.value;
+    delete page.file;
+    delete page.url;
+    page.comments ||= [];
+    page.edits = [];
     page.updatedAt = Date.now();
     this.data.pages[key] = page;
     this.save();

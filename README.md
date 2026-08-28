@@ -46,7 +46,13 @@ Review a page running on localhost:
 /human-review (localhost URL)
 ```
 
-Human Review opens the file in your browser. Make direct edits, leave comments, and click Send. Your agent receives all your feedback in one batch, then can update the source, reply directly to individual comments, or do both. Source changes refresh the page automatically, while replies appear in the **Last sent review** section.
+Review the current working tree changes in a Git repository:
+
+```sh
+human-review git path/to/repo
+```
+
+Human Review opens the file, page, or repository diff in your browser. Make direct edits where supported, leave comments, and click Send. Your agent receives all your feedback in one batch, then can update the source, reply directly to individual comments, or do both. Source changes refresh the page or Git diff automatically, while replies appear in the **Last sent review** section.
 
 Note: For HTML files, direct edits and resizes save automatically. For Markdown and localhost pages, click Send so your agent can apply them to the source.
 
@@ -64,6 +70,7 @@ Note: For HTML files, direct edits and resizes save automatically. For Markdown 
 - **Command-click links** to review multiple pages without losing your feedback.
 - **Send every edit and comment at once** instead of writing a long chat message.
 - **Continue the conversation in context** — agents can reply to individual questions directly under the original comment without forcing a document change.
+- **Review repository changes** in a read-only unified diff with switchable file-tree/list navigation, folded unchanged context, and structured file, hunk, or line comments. Reopening the same active target reuses its existing review session.
 
 I use Human Review to edit AI-generated plans, update landing pages, review localhost apps, and remove the extra copy AI likes to add to UX.
 
@@ -71,6 +78,8 @@ I use Human Review to edit AI-generated plans, update landing pages, review loca
 
 - [`cli.js`](src/cli.js) contains the `human-review`, `poll`, `status`, `reply`, and `setup` commands.
 - [`server.js`](src/server.js) runs the local review session.
+- [`git-review.js`](src/git-review.js) collects and renders working-tree diffs.
+- [`git-client.js`](src/git-client.js) handles read-only Git diff comments and navigation.
 - [`sdk.js`](src/sdk.js) handles editing, comments, highlights, and feedback.
 - [`chrome-client.js`](src/chrome-client.js) contains the visual review interface.
 - [`markdown.js`](src/markdown.js) renders Markdown files for review.

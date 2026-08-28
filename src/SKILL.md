@@ -1,6 +1,6 @@
 ---
 name: human-review
-description: Open an HTML file, Markdown file, or localhost page in the browser so the user can edit text, leave contextual comments, and converse with the agent through direct replies. Use after writing or updating anything the user will read — specs, plans, reports, newsletter drafts, landing pages, slide decks, and locally running web pages.
+description: Open an HTML file, Markdown file, localhost page, or Git working tree in the browser so the user can edit content, review code changes, leave contextual comments, and converse with the agent through direct replies. Use after writing or updating anything the user will read or review — specs, plans, reports, landing pages, locally running web pages, and repository changes.
 ---
 
 # human-review
@@ -27,6 +27,17 @@ keeping its formatting syntax.
    ```sh
    npx -y human-review http://localhost:3000/wiki
    ```
+
+   To review the current working tree changes in a Git repository:
+
+   ```sh
+   npx -y human-review git path/to/repo
+   ```
+
+   Git review is read-only in the browser. It shows tracked changes relative to
+   `HEAD` plus untracked text files; binary files appear as summaries. The left
+   navigation switches between a directory tree and a flat list, and reopening
+   the same active target reuses its existing review session.
 
 3. Wait for feedback. This blocks until they hit Send, or the timeout passes:
 
@@ -123,6 +134,12 @@ One batch covers every page the user visited, grouped by file or localhost URL.
   matching project source (such as MDX, TSX, or a template), apply every edit
   and deletion there, then acknowledge so the route reloads. Never write the
   rendered HTTP response back into the app.
+- A page with `kind: "git"` represents a repository working tree. Its comments
+  include `anchor.git` with a repo-relative `path`, `side`, `old_line`,
+  `new_line`, `hunk`, and line `text`. Use those coordinates and surrounding
+  context to inspect and update the real source. The browser diff refreshes
+  automatically after working-tree changes. Git review never produces direct
+  `edits`; all feedback arrives as comments or the Overall note.
 - When an edit's `after_html` contains `<img src="assets/...">`, the user pasted
   an image: the file already exists in an `assets/` folder next to the reviewed
   file. Keep that relative path — in Markdown, reference it as

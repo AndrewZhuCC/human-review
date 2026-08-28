@@ -13,6 +13,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, "..", "package.json"), "u
 const HELP = `human-review ${pkg.version}
 
   human-review <file-or-localhost-url> Open a file or localhost page for review
+  human-review git [repo]             Review the repository's working tree changes
   human-review poll <target>          Wait for feedback, print it as JSON (for agents)
       --ack                        Acknowledge the last batch, then keep waiting
       --timeout <secs>             Exit with {"status":"timeout"} if nothing arrives
@@ -104,8 +105,9 @@ function openBrowser(url) {
 
 // ------------------------------------------------------------------ commands
 
-async function openCommand(input) {
+async function openCommand(input, { requireGit = false } = {}) {
   const target = canonicalTarget(input);
+  if (requireGit && target.kind !== "git") throw new Error(`Not a Git repository: ${path.resolve(input || ".")}`);
   if (target.kind === "file" && !fs.existsSync(target.value)) {
     console.error(`File not found: ${target.value}`);
     process.exit(1);
@@ -118,8 +120,8 @@ async function openCommand(input) {
     process.exit(1);
   }
   const url = `http://127.0.0.1:${server.port}${body.path}`;
-  openBrowser(url);
-  console.log(`Reviewing ${target.kind === "url" ? target.value : path.basename(target.value)}`);
+  if (!body.reused) openBrowser(url);
+  console.log(`${body.reused ? "Reusing existing review for" : "Reviewing"} ${target.kind === "url" ? target.value : target.kind === "git" ? `Git changes in ${path.basename(target.value)}` : path.basename(target.value)}`);
   console.log(url);
   console.log(`\nWaiting for feedback? Run:\n  human-review poll ${shellQuote(target.value)}`);
 }
@@ -333,7 +335,9 @@ function parsePollArgs(rest) {
 }
 
 try {
-  if (argv[0] === "poll") {
+  if (argv[0] === "git") {
+    await openCommand(argv.find((arg, index) => index > 0 && !arg.startsWith("-")) || ".", { requireGit: true });
+  } else if (argv[0] === "poll") {
     const { file, ack, timeoutSecs } = parsePollArgs(argv.slice(1));
     if (!file) throw new Error("Usage: human-review poll <file-or-localhost-url> [--ack] [--timeout <secs>]");
     await pollCommand(file, { ack, timeoutSecs });

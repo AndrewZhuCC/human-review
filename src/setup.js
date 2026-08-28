@@ -45,12 +45,14 @@ export const readSkill = () => fs.readFileSync(path.join(here, "SKILL.md"), "utf
 export const skillFor = (cmd) => readSkill().replaceAll("npx -y human-review", cmd);
 
 const CODEX_BLOCK = `
-## Reviewing files and localhost pages with human-review
+## Reviewing files, localhost pages, and Git changes with human-review
 
 After writing an HTML or Markdown file the user will read, open it for them with
 \`npx -y human-review <file.html>\`. For a locally running web page, open the real
 route with \`npx -y human-review http://localhost:3000/path\` instead of recreating
-it as a static file. Then block on
+it as a static file. To review a repository's working tree changes, run
+\`npx -y human-review git <repo>\`; the browser shows a read-only diff for tracked
+changes relative to HEAD plus untracked text files. Then block on
 \`npx -y human-review poll <target> --timeout 600\` until they send feedback.
 If it prints \`{"status":"timeout"}\`, no feedback arrived yet — run the same
 poll command again to keep waiting. When a \`{"status":"feedback"}\` batch
@@ -73,7 +75,9 @@ Markdown files open rendered and are never written by human-review:
 apply source changes to the Markdown source, keeping its syntax. For a localhost
 page, direct edits and deletions arrive with \`kind: "url"\`; find and update the
 matching MDX, TSX, template, or component source. Never write the rendered HTTP
-response over project source.
+response over project source. A \`kind: "git"\` page is a read-only working-tree
+diff; its comments carry \`anchor.git\` with repo-relative path, side, old/new line
+numbers, hunk header, and line text. Use those coordinates to update the real source.
 `;
 
 export function installSkills(cwd, { global: isGlobal = false, home = os.homedir() } = {}) {
