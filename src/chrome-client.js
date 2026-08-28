@@ -300,11 +300,37 @@ function render() {
         item.append(text);
       }
       content.append(item);
+      return item;
     };
 
-    if (history.overall_note) appendHistory("Note", "Overall note", history.overall_note);
+    const appendAgentReply = (item, agentReply) => {
+      if (!agentReply?.text) return;
+      const reply = document.createElement("div");
+      reply.className = "agent-reply";
+      const head = document.createElement("div");
+      head.className = "agent-reply-head";
+      const who = document.createElement("span");
+      who.className = "agent-reply-who";
+      who.textContent = "Agent";
+      const repliedAt = Date.parse(agentReply.replied_at || "");
+      const when = document.createElement("span");
+      when.className = "agent-reply-when";
+      when.textContent = Number.isFinite(repliedAt) ? ago(repliedAt) : "";
+      head.append(who, when);
+      const text = document.createElement("p");
+      text.className = "agent-reply-text";
+      text.textContent = agentReply.text;
+      reply.append(head, text);
+      item.append(reply);
+    };
+
+    if (history.overall_note) {
+      const item = appendHistory("Note", "Overall note", history.overall_note);
+      appendAgentReply(item, history.overall_reply);
+    }
     for (const comment of history.comments || []) {
-      appendHistory("Comment", comment.kind === "element" ? "Element" : "Selection", comment.feedback, comment.quote);
+      const item = appendHistory("Comment", comment.kind === "element" ? "Element" : "Selection", comment.feedback, comment.quote);
+      appendAgentReply(item, comment.agent_reply);
     }
     for (const edit of history.edits || []) {
       const body = edit.kind === "deleted" ? "Deleted" : edit.kind === "moved" ? "Moved" : edit.after || "Edited";
@@ -863,6 +889,12 @@ function connect() {
   source.addEventListener("refresh", async () => {
     replacePage(state, await api(pageUrl(state.key, state.sessionId)));
     state.sent = false;
+    render();
+  });
+  source.addEventListener("history", async (event) => {
+    const data = JSON.parse(event.data || "{}");
+    if (data.key && data.key !== state.key) return;
+    replacePage(state, await api(pageUrl(state.key, state.sessionId)));
     render();
   });
   source.onerror = () => {

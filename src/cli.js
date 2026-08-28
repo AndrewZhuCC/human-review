@@ -17,6 +17,8 @@ const HELP = `human-review ${pkg.version}
       --ack                        Acknowledge the last batch, then keep waiting
       --timeout <secs>             Exit with {"status":"timeout"} if nothing arrives
   human-review status <target>        Report whether feedback is waiting, without blocking
+  human-review reply <target> <comment-id|overall> --message <text>
+                                      Reply to a thread in the latest sent review
   human-review setup                  Teach Claude Code / Codex how to use human-review
   human-review setup --global         ...for every project, not just this one
 
@@ -220,6 +222,30 @@ async function pollCommand(input, { ack = false, timeoutSecs = 0 } = {}) {
  * otherwise reads the persisted state directly, so a dead server still
  * reports feedback that is waiting for a fresh poll.
  */
+async function replyCommand(input, commentId, message) {
+  const target = canonicalTarget(input).value;
+  const text = String(message || "").trim();
+  if (!commentId) throw new Error("Usage: human-review reply <file-or-localhost-url> <comment-id> --message <text>");
+  if (!text) throw new Error("--message cannot be empty");
+  const server = await ensureServer();
+  const key = targetKey(target);
+  const res = await request(
+    server,
+    {
+      method: "POST",
+      path: `/api/page/${key}/reply/${encodeURIComponent(commentId)}`,
+      headers: { "content-type": "application/json" },
+    },
+    { text }
+  );
+  let body = {};
+  try {
+    body = JSON.parse(res.raw);
+  } catch {}
+  if (res.status !== 200) throw new Error(body.error || `Could not reply to comment ${commentId}.`);
+  await writeStdout(`${JSON.stringify({ status: "replied", comment_id: commentId, reply: body.reply }, null, 2)}\n`);
+}
+
 async function statusCommand(input) {
   const target = canonicalTarget(input).value;
   const saved = readServerRecord();
@@ -272,6 +298,18 @@ process.on("SIGINT", () => {
   process.exit(130);
 });
 
+function parseReplyArgs(rest) {
+  const parsed = { target: "", commentId: "", message: "" };
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i];
+    if (arg === "--message" || arg === "-m") parsed.message = rest[(i += 1)] || "";
+    else if (arg.startsWith("--message=")) parsed.message = arg.slice("--message=".length);
+    else if (!arg.startsWith("-") && !parsed.target) parsed.target = arg;
+    else if (!arg.startsWith("-") && !parsed.commentId) parsed.commentId = arg;
+  }
+  return parsed;
+}
+
 function parsePollArgs(rest) {
   const parsed = { file: "", ack: false, timeoutSecs: 0 };
   let sawTimeout = false;
@@ -303,6 +341,10 @@ try {
     const file = argv.find((a, i) => i > 0 && !a.startsWith("-"));
     if (!file) throw new Error("Usage: human-review status <file-or-localhost-url>");
     await statusCommand(file);
+  } else if (argv[0] === "reply") {
+    const { target, commentId, message } = parseReplyArgs(argv.slice(1));
+    if (!target || !commentId) throw new Error("Usage: human-review reply <file-or-localhost-url> <comment-id> --message <text>");
+    await replyCommand(target, commentId, message);
   } else if (argv[0] === "setup") {
     const isGlobal = argv.includes("--global") || argv.includes("-g");
     installSkills(process.cwd(), { global: isGlobal }).forEach((line) => console.log(line));

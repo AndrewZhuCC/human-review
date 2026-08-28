@@ -1,6 +1,6 @@
 ---
 name: human-review
-description: Open an HTML file, Markdown file, or localhost page in the browser so the user can edit text directly and leave comments on specific parts, then send all edits and comments back to you. Use after writing or updating something the user will read — specs, plans, reports, newsletter drafts, landing pages, slide decks, and locally running web pages.
+description: Open an HTML file, Markdown file, or localhost page in the browser so the user can edit text, leave contextual comments, and converse with the agent through direct replies. Use after writing or updating anything the user will read — specs, plans, reports, newsletter drafts, landing pages, slide decks, and locally running web pages.
 ---
 
 # human-review
@@ -44,7 +44,26 @@ keeping its formatting syntax.
    browser — stop polling and do not run the poll command again. Unsent
    feedback is kept and ships the next time this target is reviewed.
 
-4. Apply what comes back, then wait again. `--ack` clears the batch you just handled:
+4. Handle what comes back. Comments may be change requests, questions, or discussion:
+
+   - Update the source when a change is appropriate.
+   - Reply directly when the user is asking a question or a source change is unnecessary.
+   - Do both when an explanation helps alongside a change.
+   - A reply is optional; use your judgment instead of mechanically answering every comment.
+
+   Reply to one comment using its `id` and the page's `file` or `url` as the target:
+
+   ```sh
+   npx -y human-review reply path/to/file.html c_123 --message "Your answer here"
+   ```
+
+   Reply to the batch's Overall note with the reserved thread id `overall`:
+
+   ```sh
+   npx -y human-review reply path/to/file.html overall --message "Your answer here"
+   ```
+
+   Then wait again. `--ack` clears the batch you handled while preserving the review and your replies in the browser:
 
    ```sh
    npx -y human-review poll path/to/file.html --ack --timeout 600
@@ -117,11 +136,11 @@ One batch covers every page the user visited, grouped by file or localhost URL.
   after the block whose text starts with `moved_after`, and right before the
   block whose text starts with `moved_before`. An empty `moved_after` means it
   is now the first block in its container.
-- Find each comment by its `quote`; that exact string is in the file.
+- Comments are not always instructions to edit the source. They may ask why something works a certain way, request clarification, or invite discussion. Decide whether the best response is a source change, a direct reply, both, or no reply.
+- To reply in the review page, run `npx -y human-review reply <target> <comment-id> --message <text>`. Use `overall` instead of a comment id to reply to the Overall note. Replies are attached to the corresponding thread in **Last sent review** and appear without reloading the document.
+- Find a change-request comment by its `quote`; that exact string is in the file.
 - `kind: "element"` points at a whole block, so `quote` is its label, not body text.
 - Fix every page in `pages`, not just the first.
-- **Do not write a reply.** There is no chat. The user sees your work when the page
-  reloads, which happens on its own the moment you save the file.
 
 ## Better edit labels (optional)
 

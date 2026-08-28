@@ -278,16 +278,17 @@ export function createServer() {
             "When an edit includes `staged_assets`, copy each local image into the app's appropriate asset folder, replace its " +
             "temporary preview URL in `after_html`, and preserve the image at the user's insertion point. "
           : "") +
-        "When every page is updated, run the same poll command again with --ack to clear this " +
-        "batch and wait for more.",
+        "Comments may be change requests, questions, or discussion. Use your judgment: update the source, reply directly, do both, or neither when appropriate. " +
+        `To answer one comment in the review page, run \`${cliInvocation} reply <target> <comment-id> --message <text>\`; use \`overall\` instead of a comment id to answer the Overall note, and use that page's file or URL as <target>. ` +
+        "When every page is handled, run the same poll command again with --ack to clear this batch and wait for more.",
     };
 
     // Keep one durable, read-only snapshot per page so the reviewer can recall
     // what they asked for after the agent acknowledges and the live queue clears.
     for (const page of pages) {
       store.setLastReview(page.key, {
-        comments: page.comments,
-        edits: page.edits,
+        comments: page.comments.map((comment) => ({ ...comment })),
+        edits: page.edits.map((edit) => ({ ...edit })),
         overall_note: note || "",
         sent_at: sentAt,
       });
@@ -693,6 +694,18 @@ export function createServer() {
           if (!feedback) return json(res, 400, { error: "empty feedback" });
           if (!store.updateComment(key, tail, feedback)) return json(res, 404, { error: "unknown comment" });
           return json(res, 200, { page: pageState(key) });
+        }
+
+        if (action === "reply" && req.method === "POST" && tail) {
+          const body = await readBody(req);
+          const text = String(body.text || "").trim();
+          if (!text) return json(res, 400, { error: "empty reply" });
+          const reply = { text: text.slice(0, 12000), replied_at: new Date().toISOString() };
+          if (!store.replyToLastReview(key, tail, reply)) {
+            return json(res, 404, { error: "thread is not in the latest sent review" });
+          }
+          for (const session of sessionsForKey(key)) emit(session, "history", { key });
+          return json(res, 200, { ok: true, comment_id: tail, reply, page: pageState(key) });
         }
 
         if (action === "edit" && req.method === "POST") {

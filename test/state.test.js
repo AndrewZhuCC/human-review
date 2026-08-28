@@ -85,6 +85,41 @@ test("last sent review survives acknowledgement and a store restart", () => {
   assert.deepEqual(new Store().page(key).lastReview, review, "history remains durable after restart");
 });
 
+test("agent replies attach only to comments in the latest sent review", () => {
+  const store = new Store();
+  const { key } = store.openPage(page("review-reply.html", "<p>x</p>"), "<p>x</p>");
+  store.setLastReview(key, {
+    comments: [{ id: "c1", kind: "selection", quote: "x", feedback: "Why is this needed?" }],
+    edits: [],
+    overall_note: "",
+    sent_at: "2026-08-28T00:00:00.000Z",
+  });
+
+  const first = { text: "It protects the fallback path.", replied_at: "2026-08-28T00:01:00.000Z" };
+  assert.ok(store.replyToLastReview(key, "c1", first));
+  assert.deepEqual(store.page(key).lastReview.comments[0].agent_reply, first);
+  assert.equal(store.replyToLastReview(key, "missing", first), null, "unknown comments are rejected");
+
+  const replacement = { text: "Updated explanation.", replied_at: "2026-08-28T00:02:00.000Z" };
+  store.replyToLastReview(key, "c1", replacement);
+  assert.deepEqual(new Store().page(key).lastReview.comments[0].agent_reply, replacement, "the latest reply replaces and persists");
+  assert.equal(store.replyToLastReview(key, "overall", replacement), null, "an absent Overall note cannot receive a reply");
+});
+
+test("the Overall note can receive a durable agent reply", () => {
+  const store = new Store();
+  const { key } = store.openPage(page("overall-reply.html", "<p>x</p>"), "<p>x</p>");
+  store.setLastReview(key, {
+    comments: [],
+    edits: [],
+    overall_note: "Can you explain the tradeoff?",
+    sent_at: "2026-08-28T00:00:00.000Z",
+  });
+  const reply = { text: "The simpler option reduces coordination overhead.", replied_at: "2026-08-28T00:03:00.000Z" };
+  assert.ok(store.replyToLastReview(key, "overall", reply));
+  assert.deepEqual(new Store().page(key).lastReview.overall_reply, reply);
+});
+
 test("pages are independent of one another", () => {
   const store = new Store();
   const a = store.openPage(page("p1.html", "<p>a</p>"), "<p>a</p>");

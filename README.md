@@ -46,7 +46,7 @@ Review a page running on localhost:
 /human-review (localhost URL)
 ```
 
-Human Review opens the file in your browser. Make direct edits, leave comments, and click Send. Your agent receives all your feedback in one batch, updates the source, and refreshes the page for another review.
+Human Review opens the file in your browser. Make direct edits, leave comments, and click Send. Your agent receives all your feedback in one batch, then can update the source, reply directly to individual comments, or do both. Source changes refresh the page automatically, while replies appear in the **Last sent review** section.
 
 Note: For HTML files, direct edits and resizes save automatically. For Markdown and localhost pages, click Send so your agent can apply them to the source.
 
@@ -63,12 +63,13 @@ Note: For HTML files, direct edits and resizes save automatically. For Markdown 
 - **Remove elements** without explaining the deletion in chat.
 - **Command-click links** to review multiple pages without losing your feedback.
 - **Send every edit and comment at once** instead of writing a long chat message.
+- **Continue the conversation in context** — agents can reply to individual questions directly under the original comment without forcing a document change.
 
 I use Human Review to edit AI-generated plans, update landing pages, review localhost apps, and remove the extra copy AI likes to add to UX.
 
 ## What’s inside
 
-- [`cli.js`](src/cli.js) contains the `human-review`, `poll`, `status`, and `setup` commands.
+- [`cli.js`](src/cli.js) contains the `human-review`, `poll`, `status`, `reply`, and `setup` commands.
 - [`server.js`](src/server.js) runs the local review session.
 - [`sdk.js`](src/sdk.js) handles editing, comments, highlights, and feedback.
 - [`chrome-client.js`](src/chrome-client.js) contains the visual review interface.

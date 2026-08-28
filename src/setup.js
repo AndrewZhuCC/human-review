@@ -61,15 +61,19 @@ If the shell returns a process or session handle, keep waiting on that handle un
 the command exits. \`npx -y human-review status <target>\` reports instantly
 whether feedback is already waiting, without blocking.
 
-The batch groups feedback by page under \`pages\`, so fix every page listed. Items
+The batch groups feedback by page under \`pages\`, so handle every page listed. Items
 under \`edits\` are changes the user already made: \`after\` is their exact wording,
 so carry it across verbatim and never revert it — and if the HTML was generated
-from MDX or Markdown, apply it to the source too. Markdown files open rendered
-and are never written by human-review: apply their comments and edits to the
-Markdown source, keeping its syntax. There is no reply channel; the user sees
-your work when the page reloads. For a localhost page, direct edits and deletions
-arrive with \`kind: "url"\`; find and update the matching MDX, TSX, template, or
-component source. Never write the rendered HTTP response over project source.
+from MDX or Markdown, apply it to the source too. Comments may be change requests,
+questions, or discussion. Use judgment: update the source, reply directly with
+\`npx -y human-review reply <target> <comment-id> --message <text>\`, do both, or
+leave a comment unanswered when appropriate. Use \`overall\` instead of a comment
+id to answer the Overall note. Replies appear under their thread in Last sent review.
+Markdown files open rendered and are never written by human-review:
+apply source changes to the Markdown source, keeping its syntax. For a localhost
+page, direct edits and deletions arrive with \`kind: "url"\`; find and update the
+matching MDX, TSX, template, or component source. Never write the rendered HTTP
+response over project source.
 `;
 
 export function installSkills(cwd, { global: isGlobal = false, home = os.homedir() } = {}) {

@@ -240,6 +240,24 @@ export class Store {
     });
   }
 
+  /** Attach or replace an agent response on one thread in the latest review. */
+  replyToLastReview(key, threadId, reply) {
+    let found = false;
+    const page = this.update(key, (entry) => {
+      if (threadId === "overall") {
+        if (!entry.lastReview?.overall_note) return;
+        entry.lastReview.overall_reply = reply;
+        found = true;
+        return;
+      }
+      const comment = entry.lastReview?.comments?.find((item) => item.id === threadId);
+      if (!comment) return;
+      comment.agent_reply = reply;
+      found = true;
+    });
+    return found ? page : null;
+  }
+
   /** After the agent writes, its version becomes the new revert target. */
   setPristine(key, html) {
     return this.update(key, (page) => {

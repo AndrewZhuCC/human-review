@@ -94,6 +94,8 @@ const file = path.join(tmp, "review.html");
 fs.writeFileSync(file, "<p>Original</p>");
 const first = spawnServer();
 let server;
+let reviewKey;
+let reviewCommentId;
 
 test("poll --timeout exits cleanly with a timeout status", async () => {
   server = await waitForServer();
@@ -111,18 +113,47 @@ test("status is idle before feedback, waiting after", async () => {
   assert.equal(JSON.parse(before.stdout).status, "idle");
 
   const opened = await request(server, "POST", "/api/session", { file });
-  await request(server, "POST", `/api/page/${opened.body.key}/comment`, {
+  reviewKey = opened.body.key;
+  const commented = await request(server, "POST", `/api/page/${reviewKey}/comment`, {
     kind: "selection",
     quote: "Original",
-    feedback: "Sharper, please.",
+    feedback: "Why does this need to be sharper?",
   });
-  await request(server, "POST", `/api/page/${opened.body.key}/send`, { sessionId: opened.body.sessionId, note: "" });
+  reviewCommentId = commented.body.comment.id;
+  await request(server, "POST", `/api/page/${reviewKey}/send`, { sessionId: opened.body.sessionId, note: "Can you also explain the overall approach?" });
 
   const after = await collect(cli("status", file));
   assert.equal(after.code, 0, after.stderr);
   const parsed = JSON.parse(after.stdout);
   assert.equal(parsed.status, "feedback-waiting");
   assert.equal(parsed.feedback_waiting, true);
+});
+
+test("reply command attaches an agent response to the sent comment", async () => {
+  const result = await collect(cli("reply", file, reviewCommentId, "--message", "It makes the requirement easier to verify."));
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, "replied");
+  assert.equal(output.comment_id, reviewCommentId);
+
+  const page = await request(server, "GET", `/api/page/${reviewKey}`);
+  const comment = page.body.lastReview.comments.find((item) => item.id === reviewCommentId);
+  assert.equal(comment.agent_reply.text, "It makes the requirement easier to verify.");
+  assert.ok(comment.agent_reply.replied_at);
+});
+
+test("reply command can answer the Overall note", async () => {
+  const result = await collect(cli("reply", file, "overall", "--message", "The overall approach keeps feedback attached to its source context."));
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).comment_id, "overall");
+  const page = await request(server, "GET", `/api/page/${reviewKey}`);
+  assert.equal(page.body.lastReview.overall_reply.text, "The overall approach keeps feedback attached to its source context.");
+});
+
+test("reply command rejects a thread outside the latest review", async () => {
+  const result = await collect(cli("reply", file, "c_missing", "--message", "No such thread."));
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /thread is not in the latest sent review/);
 });
 
 test("a restarted server still delivers the sent batch", async () => {
@@ -137,7 +168,7 @@ test("a restarted server still delivers the sent batch", async () => {
     assert.equal(result.code, 0, result.stderr);
     const batch = JSON.parse(result.stdout);
     assert.equal(batch.status, "feedback");
-    assert.equal(batch.pages[0].comments[0].feedback, "Sharper, please.");
+    assert.equal(batch.pages[0].comments[0].feedback, "Why does this need to be sharper?");
   } finally {
     // Kill the server before cleanup deletes its state dir — Windows cannot
     // remove files a live process still holds open.

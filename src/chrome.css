@@ -355,6 +355,11 @@ body.collapsed .handle { right: 0; }
   color: var(--faint-2); font-size: 11px; font-style: italic; line-height: 1.4;
 }
 .history-body { margin: 7px 0 0; color: var(--txt); font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
+.agent-reply { margin-top: 9px; padding: 9px 10px; border-radius: 7px; background: var(--soft); box-shadow: inset 2px 0 0 var(--green); }
+.agent-reply-head { display: flex; align-items: baseline; gap: 7px; margin-bottom: 4px; }
+.agent-reply-who { color: var(--strong-txt); font-size: 10.5px; font-weight: 650; }
+.agent-reply-when { color: var(--faint); font-size: 10px; }
+.agent-reply-text { margin: 0; color: var(--txt); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
 .save-line { display: flex; align-items: center; gap: 7px; padding: 0 4px 9px; color: var(--faint-2); font-size: 11px; }
 .save-line.saving { color: var(--mute); }
 .save-line.failed { color: var(--danger); }
