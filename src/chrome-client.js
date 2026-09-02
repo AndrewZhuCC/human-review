@@ -5,7 +5,7 @@
  * hostname: a separate origin that can never reach this page or its token.
  */
 import { tidy } from "./anchor-text.js";
-import { pageUrl, replacePage } from "./chrome-session.js";
+import { agentDisplay, pageUrl, replacePage } from "./chrome-session.js";
 import { framePolicy } from "./frame-policy.js";
 
 const $ = (id) => document.getElementById(id);
@@ -400,10 +400,12 @@ function render() {
     send.append(" ", key);
   }
 
-  // After sending, say what happens next. If nothing is polling, the loop would
-  // otherwise dead-end silently, so hand over the exact command to run.
-  $("agentLine").hidden = !delivered;
-  $("agentText").textContent = "Feedback delivered — page reloads when fixes land";
+  // Make the live poll connection visible before feedback is sent, not only
+  // after the agent has taken a batch. Otherwise listening and idle look alike.
+  const agent = agentDisplay(state.agent);
+  $("agentLine").hidden = !agent.visible;
+  $("agentText").textContent = agent.text;
+  $("agentLine").querySelector(".dot").className = agent.tone === "working" ? "dot amber" : "dot";
 
   // Server-authoritative, so it survives a browser refresh.
   $("handoff").hidden = !stranded;
