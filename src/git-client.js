@@ -132,6 +132,19 @@ function activate(id, scroll) {
   if (scroll) element.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+function navigationWidth(value) {
+  if (value === null || value === undefined || value === "") return 260;
+  const width = Number(value);
+  return Number.isFinite(width) ? Math.min(520, Math.max(180, Math.round(width))) : 260;
+}
+
+function applyNavigationWidth(value) {
+  const width = navigationWidth(value);
+  document.body.style.setProperty("--git-nav-width", `${width}px`);
+  document.querySelector(".nav-resizer")?.setAttribute("aria-valuenow", String(width));
+  return width;
+}
+
 function applyNavigationMode(mode) {
   const next = mode === "list" ? "list" : "tree";
   document.querySelectorAll("[data-git-nav-view]").forEach((view) => {
@@ -144,6 +157,40 @@ function applyNavigationMode(mode) {
 
 function boot() {
   applyNavigationMode("tree");
+  applyNavigationWidth(260);
+
+  const resizer = document.querySelector(".nav-resizer");
+  let resizing = false;
+  if (resizer) {
+    resizer.addEventListener("pointerdown", (event) => {
+      if (matchMedia("(max-width: 900px)").matches) return;
+      event.preventDefault();
+      resizing = true;
+      document.body.classList.add("resizing-nav");
+      resizer.setPointerCapture?.(event.pointerId);
+    });
+    window.addEventListener("pointermove", (event) => {
+      if (!resizing) return;
+      event.preventDefault();
+      applyNavigationWidth(event.clientX);
+    });
+    const finishResize = () => {
+      if (!resizing) return;
+      resizing = false;
+      document.body.classList.remove("resizing-nav");
+      const width = applyNavigationWidth(parseFloat(getComputedStyle(document.body).getPropertyValue("--git-nav-width")));
+      post("eh:gitNavWidth", { width });
+    };
+    window.addEventListener("pointerup", finishResize);
+    window.addEventListener("pointercancel", finishResize);
+    resizer.addEventListener("keydown", (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const current = parseFloat(getComputedStyle(document.body).getPropertyValue("--git-nav-width"));
+      const width = event.key === "Home" ? 180 : event.key === "End" ? 520 : current + (event.key === "ArrowLeft" ? -20 : 20);
+      post("eh:gitNavWidth", { width: applyNavigationWidth(width) });
+    });
+  }
 
   const style = document.createElement("style");
   style.setAttribute("data-eh-sdk", "");
@@ -197,6 +244,9 @@ function boot() {
         break;
       case "eh:gitNavMode":
         applyNavigationMode(msg.mode);
+        break;
+      case "eh:gitNavWidth":
+        applyNavigationWidth(msg.width);
         break;
       case "eh:commit":
         commitPending(msg.id);

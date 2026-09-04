@@ -5,7 +5,7 @@
  * hostname: a separate origin that can never reach this page or its token.
  */
 import { tidy } from "./anchor-text.js";
-import { agentDisplay, pageUrl, replacePage } from "./chrome-session.js";
+import { agentDisplay, gitNavWidth, pageUrl, replacePage } from "./chrome-session.js";
 import { framePolicy } from "./frame-policy.js";
 
 const $ = (id) => document.getElementById(id);
@@ -602,10 +602,13 @@ window.addEventListener("message", async (event) => {
       toFrame({ type: "eh:anchors", comments: state.page ? state.page.comments : [] });
       if (state.page?.git) {
         let mode = "tree";
+        let width = 260;
         try {
           mode = localStorage.getItem("human-review:git-nav-mode") || "tree";
+          width = gitNavWidth(localStorage.getItem("human-review:git-nav-width"));
         } catch {}
         toFrame({ type: "eh:gitNavMode", mode });
+        toFrame({ type: "eh:gitNavWidth", width });
       }
       if (state.reloading) {
         toFrame({ type: "eh:restoreScroll", x: state.scroll.x, y: state.scroll.y });
@@ -699,6 +702,11 @@ window.addEventListener("message", async (event) => {
     case "eh:gitNavMode":
       try {
         localStorage.setItem("human-review:git-nav-mode", msg.mode === "list" ? "list" : "tree");
+      } catch {}
+      break;
+    case "eh:gitNavWidth":
+      try {
+        localStorage.setItem("human-review:git-nav-width", String(gitNavWidth(msg.width)));
       } catch {}
       break;
     case "eh:external":

@@ -336,9 +336,10 @@ export function collectGitChanges(input) {
 const STYLE = `
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body { margin: 0; background: #f6f7f9; color: #24292f; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  body { --git-nav-width: 260px; margin: 0; background: #f6f7f9; color: #24292f; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  body.resizing-nav { cursor: ew-resize; user-select: none; }
   .layout { min-height: 100vh; }
-  .files { position: fixed; inset: 0 auto 0 0; width: 260px; overflow: auto; padding: 18px 12px 40px; border-right: 1px solid #d8dee4; background: #fff; }
+  .files { position: fixed; inset: 0 auto 0 0; width: var(--git-nav-width); overflow: auto; padding: 18px 12px 40px; border-right: 1px solid #d8dee4; background: #fff; }
   .files h1 { margin: 0 8px 5px; font: 600 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .summary { margin: 0 8px 10px; color: #57606a; font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .nav-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin: 0 8px 10px; padding: 3px; border-radius: 7px; background: #eef1f4; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -351,7 +352,12 @@ const STYLE = `
   .tree-dir > summary { padding: 5px 5px; border-radius: 5px; color: #57606a; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .tree-dir > summary:hover { background: #f3f4f6; color: #0969da; }
   .tree-children { margin-left: 9px; padding-left: 6px; border-left: 1px solid #d8dee4; }
-  main { margin-left: 260px; padding: 24px 28px 100px; }
+  .nav-resizer { position: fixed; z-index: 5; top: 0; bottom: 0; left: calc(var(--git-nav-width) - 5px); width: 10px; cursor: ew-resize; touch-action: none; }
+  .nav-resizer::before { content: ""; position: absolute; inset: 0 4px; background: #d0d7de; transition: background 120ms ease; }
+  .nav-resizer::after { content: "⋮"; position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 14px; height: 38px; transform: translate(-50%, -50%); border: 1px solid #afb8c1; border-radius: 7px; background: #fff; color: #57606a; font: 18px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; box-shadow: 0 1px 3px rgba(31,35,40,.15); transition: border-color 120ms ease, background 120ms ease, color 120ms ease; }
+  .nav-resizer:hover::before, body.resizing-nav .nav-resizer::before { background: #0969da; }
+  .nav-resizer:hover::after, body.resizing-nav .nav-resizer::after { border-color: #0969da; background: #0969da; color: #fff; }
+  main { margin-left: var(--git-nav-width); padding: 24px 28px 100px; }
   .empty { max-width: 720px; margin: 80px auto; padding: 32px; border: 1px dashed #afb8c1; border-radius: 10px; background: #fff; color: #57606a; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .file { margin: 0 auto 24px; max-width: 1180px; border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden; background: #fff; }
   .file-head { position: sticky; top: 0; z-index: 2; display: flex; gap: 10px; align-items: center; padding: 9px 12px; border-bottom: 1px solid #d0d7de; background: #f6f8fa; }
@@ -373,7 +379,7 @@ const STYLE = `
   .num { padding: 2px 8px; border-right: 1px solid rgba(27,31,36,.08); color: #6e7781; text-align: right; user-select: none; }
   .mark { padding: 2px 3px; user-select: none; }
   .code { padding: 2px 8px; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
-  @media (max-width: 900px) { .files { position: static; width: auto; max-height: 220px; border-right: 0; border-bottom: 1px solid #d8dee4; } main { margin-left: 0; padding: 16px 10px 80px; } }
+  @media (max-width: 900px) { .files { position: static; width: auto; max-height: 220px; border-right: 0; border-bottom: 1px solid #d8dee4; } .nav-resizer { display: none; } main { margin-left: 0; padding: 16px 10px 80px; } }
 `;
 
 function gitAttrs(context) {
@@ -497,6 +503,6 @@ export function renderGitReview(input) {
   const content = sections || `<div class="empty">No working tree changes to review.</div>`;
   return {
     ...change,
-    html: `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Git changes · ${escapeHtml(path.basename(change.repo))}</title><style>${STYLE}</style></head><body><div class="layout"><nav class="files" data-eh-ui><h1>${escapeHtml(path.basename(change.repo))}</h1><p class="summary">${escapeHtml(summary)}</p>${navigation}</nav><main>${content}</main></div></body></html>`,
+    html: `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Git changes · ${escapeHtml(path.basename(change.repo))}</title><style>${STYLE}</style></head><body><div class="layout"><nav class="files" data-eh-ui><h1>${escapeHtml(path.basename(change.repo))}</h1><p class="summary">${escapeHtml(summary)}</p>${navigation}</nav><div class="nav-resizer" role="separator" aria-label="Resize file navigation" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="520" aria-valuenow="260" tabindex="0" data-eh-ui></div><main>${content}</main></div></body></html>`,
   };
 }

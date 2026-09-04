@@ -191,6 +191,12 @@ test("renderGitReview emits a read-only navigable diff with structured line anch
   assert.ok(treeLink && listLink, "both navigation modes include every file");
   assert.equal(treeLink.getAttribute("href"), listLink.getAttribute("href"), "tree and list share stable anchors");
   assert.equal(document.querySelector('[data-git-nav-mode="tree"]').getAttribute("aria-pressed"), "true");
+  const resizer = document.querySelector('.nav-resizer[role="separator"]');
+  assert.ok(resizer, "the file navigation exposes a resize handle");
+  assert.equal(resizer.getAttribute("aria-valuemin"), "180");
+  assert.equal(resizer.getAttribute("aria-valuemax"), "520");
+  assert.match(rendered.html, /--git-nav-width: 260px/);
+  assert.match(rendered.html, /margin-left: var\(--git-nav-width\)/);
 });
 
 test("Git targets are canonical and stable from nested directories", () => {

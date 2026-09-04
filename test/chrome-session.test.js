@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { agentDisplay, pageUrl, replacePage } from "../src/chrome-session.js";
+import { agentDisplay, gitNavWidth, pageUrl, replacePage } from "../src/chrome-session.js";
 
 test("page refreshes keep session context and clear stale cross-page counts", () => {
   assert.equal(pageUrl("abc123", "session with spaces"), "/api/page/abc123?session=session%20with%20spaces");
@@ -16,6 +16,14 @@ test("page refreshes keep session context and clear stale cross-page counts", ()
 
   assert.equal(state.page, refreshed);
   assert.deepEqual(state.others, []);
+});
+
+test("Git navigation width is clamped and defaults safely", () => {
+  assert.equal(gitNavWidth(null), 260);
+  assert.equal(gitNavWidth(undefined), 260);
+  assert.equal(gitNavWidth("320.4"), 320);
+  assert.equal(gitNavWidth(100), 180);
+  assert.equal(gitNavWidth(900), 520);
 });
 
 test("agent poll state is visible before feedback is sent", () => {
