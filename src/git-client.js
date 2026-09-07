@@ -149,6 +149,13 @@ function applyNavigationMode(mode) {
   const next = mode === "list" ? "list" : "tree";
   document.querySelectorAll("[data-git-nav-view]").forEach((view) => {
     view.hidden = view.getAttribute("data-git-nav-view") !== next;
+    if (!view.hidden) {
+      const main = document.querySelector("main");
+      for (const link of view.querySelectorAll('a[href^="#file-"]')) {
+        const file = document.getElementById(link.getAttribute("href").slice(1));
+        if (file?.parentElement === main) main.appendChild(file);
+      }
+    }
   });
   document.querySelectorAll("[data-git-nav-mode]").forEach((button) => {
     button.setAttribute("aria-pressed", button.getAttribute("data-git-nav-mode") === next ? "true" : "false");

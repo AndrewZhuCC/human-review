@@ -199,6 +199,30 @@ test("renderGitReview emits a read-only navigable diff with structured line anch
   assert.match(rendered.html, /margin-left: var\(--git-nav-width\)/);
 });
 
+test("switching navigation mode reorders existing diff nodes to match its file links", () => {
+  const repo = createRepo();
+  fs.mkdirSync(path.join(repo, "src", "nested"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "src", "nested", "feature.txt"), "nested change\n");
+  const dom = new JSDOM(renderGitReview(repo).html, { runScripts: "outside-only", url: "http://localhost:1234/" });
+  const { document } = dom.window;
+  try {
+    const client = fs.readFileSync(new URL("../src/git-client.js", import.meta.url), "utf8");
+    dom.window.eval(client.replace(/^import .*;\n/gm, ""));
+    const files = [...document.querySelectorAll("main > .file")];
+    files[0].setAttribute("data-eh-el", "existing-comment");
+    const order = (mode) => [...document.querySelectorAll(`[data-git-nav-view="${mode}"] a`)].map((a) => a.hash.slice(1));
+    assert.notDeepEqual(order("tree"), order("list"), "fixture must expose distinct tree/list ordering");
+    for (const mode of ["tree", "list", "tree"]) {
+      dom.window.eval(`applyNavigationMode("${mode}")`);
+      assert.deepEqual([...document.querySelectorAll("main > .file")].map((file) => file.id), order(mode));
+      assert.equal(document.getElementById(files[0].id), files[0], "move nodes instead of rebuilding comment anchors");
+      assert.equal(files[0].getAttribute("data-eh-el"), "existing-comment");
+    }
+  } finally {
+    dom.window.close();
+  }
+});
+
 test("Git targets are canonical and stable from nested directories", () => {
   const repo = createRepo();
   const nested = path.join(repo, "nested");
