@@ -11,6 +11,7 @@ import { canonicalTarget, ensureStateDir, localUrl, SERVER_PROTOCOL, serverPath,
 import { invocation, shellQuote } from "./setup.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const mermaidDist = path.join(here, "..", "node_modules", "mermaid", "dist");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -477,6 +478,18 @@ export function createServer() {
     res.end(JSON.stringify(payload));
   };
 
+  function vendorFile(root, relative) {
+    let decoded;
+    try {
+      decoded = decodeURIComponent(relative);
+    } catch {
+      return null;
+    }
+    const file = path.resolve(root, decoded);
+    const rel = path.relative(root, file);
+    return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? file : null;
+  }
+
   function serveFile(res, file, extraHeaders) {
     fs.readFile(file, (err, buf) => {
       if (err) {
@@ -564,6 +577,12 @@ export function createServer() {
       if (route === "/chrome-session.js") return serveFile(res, path.join(here, "chrome-session.js"), CORS);
       if (route === "/sdk.js") return serveFile(res, path.join(here, "sdk.js"), CORS);
       if (route === "/git-client.js") return serveFile(res, path.join(here, "git-client.js"), CORS);
+      if (route === "/markdown-client.js") return serveFile(res, path.join(here, "markdown-client.js"), CORS);
+      if (route.startsWith("/vendor/mermaid/")) {
+        const file = vendorFile(mermaidDist, route.slice("/vendor/mermaid/".length));
+        if (!file) return json(res, 404, { error: "unknown Mermaid asset" });
+        return serveFile(res, file, CORS);
+      }
       if (route === "/editing.js") return serveFile(res, path.join(here, "editing.js"), CORS);
       if (route === "/anchor-text.js") return serveFile(res, path.join(here, "anchor-text.js"), CORS);
       if (route === "/frame-policy.js") return serveFile(res, path.join(here, "frame-policy.js"), CORS);
@@ -654,7 +673,10 @@ export function createServer() {
               return res.end("File is gone");
             }
             // Markdown reviews render on the fly; the source file stays untouched.
-            if (isMarkdown(page.file)) html = renderMarkdownPage(html, page.file);
+            if (isMarkdown(page.file)) {
+              html = renderMarkdownPage(html, page.file);
+              sdkOptions = { src: `/markdown-client.js?key=${encodeURIComponent(key)}` };
+            }
           }
           res.writeHead(200, { "content-type": MIME[".html"], "cache-control": "no-store" });
           return res.end(injectSdk(html, key, sdkOptions));

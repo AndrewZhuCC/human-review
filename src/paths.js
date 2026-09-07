@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 
 // Bump this when the CLI and detached server no longer share the same request
 // contract. A new CLI must not silently reuse an older background server.
-export const SERVER_PROTOCOL = 17;
+export const SERVER_PROTOCOL = 19;
 
 export function stateDir() {
   const override = process.env.HUMAN_REVIEW_STATE_DIR;
@@ -98,6 +98,20 @@ export function canonicalTarget(target) {
   if (url) return { kind: "url", value: url };
   const repo = gitRoot(target);
   return repo ? { kind: "git", value: repo } : { kind: "file", value: realFile(target) };
+}
+
+/** Resolve a poll/status/reply target even when the agent changed directories. */
+export function knownTarget(target, pages = {}) {
+  const input = String(target || "");
+  const canonical = canonicalTarget(input);
+  if (/^https?:\/\//i.test(input) || path.isAbsolute(input) || canonical.kind !== "file" || fs.existsSync(canonical.value)) {
+    return canonical.value;
+  }
+  const suffix = `${path.sep}${path.normalize(input).replace(/[\\/]+/g, path.sep)}`;
+  const matches = [...new Set(Object.values(pages).map((page) => page?.kind === "url" ? page.url : page?.kind === "git" ? page.repo : page?.file).filter((value) => typeof value === "string" && value.endsWith(suffix)))];
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) throw new Error(`Relative target is ambiguous; use an absolute path: ${input}`);
+  return canonical.value;
 }
 
 export function realFile(file) {

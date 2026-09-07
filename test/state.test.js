@@ -8,7 +8,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "human-review-test-"));
 process.env.HUMAN_REVIEW_STATE_DIR = path.join(tmp, "state");
 
 const { Store, resolveAsset } = await import("../src/state.js");
-const { canonicalTarget, localUrl, targetKey } = await import("../src/paths.js");
+const { canonicalTarget, knownTarget, localUrl, targetKey } = await import("../src/paths.js");
 
 function page(name, body) {
   const file = path.join(tmp, name);
@@ -146,6 +146,17 @@ test("localhost targets are canonical, durable, and distinct from files", () => 
 
   const reloaded = new Store();
   assert.equal(reloaded.page(opened.key).url, opened.url, "URL pages survive without a backing file");
+});
+
+test("relative command targets resolve to one known reviewed file across working directories", () => {
+  const relative = path.join("openspec", "changes", "demo", "plan.md");
+  const reviewed = path.join(tmp, "project", relative);
+  const pages = { one: { kind: "file", file: reviewed } };
+  assert.equal(knownTarget(relative, pages), reviewed);
+  assert.throws(
+    () => knownTarget(relative, { ...pages, two: { kind: "file", file: path.join(tmp, "other", relative) } }),
+    /ambiguous; use an absolute path/
+  );
 });
 
 test("stale pages and pages whose file vanished are pruned on load", () => {

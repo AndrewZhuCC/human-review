@@ -82,6 +82,19 @@ test("renderMarkdownPage produces a full document from gfm source", () => {
   assert.match(html, /<title>plan\.md<\/title>/);
 });
 
+test("renderMarkdownPage marks Mermaid fences for safe client rendering", () => {
+  const html = renderMarkdownPage(
+    "```Mermaid title=flow\nflowchart LR\n  A[<img src=x onerror=alert(1)>] --> B\n```\n\n```js\nconsole.log('plain code')\n```\n",
+    "/x/diagram.md"
+  );
+  const document = new JSDOM(html).window.document;
+  const diagram = document.querySelector(".mermaid-diagram.mermaid");
+  assert.ok(diagram, "Mermaid language matching is case-insensitive");
+  assert.match(diagram.textContent, /flowchart LR/);
+  assert.equal(diagram.querySelector("img"), null, "diagram source is escaped before Mermaid sees it");
+  assert.ok(document.querySelector("pre code.language-js"), "ordinary fenced code keeps Marked's default rendering");
+});
+
 test("renderMarkdownPage adds a review-only table of contents for h1-h3", () => {
   const html = renderMarkdownPage(
     "# Runtime Watchdog\n\n## Call Trace\n\n### 数据流\n\n#### Internal detail\n\n## Call Trace\n",
@@ -174,7 +187,18 @@ test("a markdown review is rendered, flagged, and never writable", async (t) => 
     assert.equal(res.status, 200);
     assert.match(res.raw, /<h1[^>]*>Notes<\/h1>/);
     assert.match(res.raw, /data-eh-sdk/);
+    assert.match(res.raw, /markdown-client\.js\?key=/, "Markdown uses the Mermaid-aware client before the review SDK");
     assert.doesNotMatch(res.raw, /# Notes/, "raw markdown syntax does not leak through");
+  });
+
+  await t.test("Mermaid browser assets are served without allowing traversal", async () => {
+    const entry = await request(port, token, { route: "/vendor/mermaid/mermaid.esm.min.mjs" });
+    assert.equal(entry.status, 200);
+    assert.match(entry.raw, /chunks\/mermaid\.esm\.min\//);
+    const chunk = entry.raw.match(/\.\/([^"']+\.mjs)/)?.[1];
+    assert.ok(chunk, "the Mermaid entry references a relative chunk");
+    assert.equal((await request(port, token, { route: `/vendor/mermaid/${chunk}` })).status, 200);
+    assert.equal((await request(port, token, { route: "/vendor/mermaid/%2e%2e%2fpackage.json" })).status, 404);
   });
 
   await t.test("page state marks the page as markdown", async () => {

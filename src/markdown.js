@@ -52,6 +52,11 @@ const STYLE = `
   }
   pre { background: #f2f0ea; border-radius: 8px; padding: 14px 16px; overflow-x: auto; }
   pre code { background: none; padding: 0; }
+  .mermaid-diagram { margin: 1.25em 0; padding: 18px; overflow-x: auto; border: 1px solid #e4e2db; border-radius: 10px; background: #fff; text-align: center; }
+  .mermaid-diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  .mermaid-error { border-color: #e7b4ad; background: #fff5f3; color: #8b2c20; text-align: left; }
+  .mermaid-error strong { display: block; margin-bottom: 8px; font: 600 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .mermaid-error pre { margin: 0; background: rgba(255,255,255,.65); color: #1b1a16; }
   blockquote { margin: 1em 0; padding: .1em 1em; border-left: 3px solid #d8d5cb; color: #6b6862; }
   table { border-collapse: collapse; margin: 1em 0; width: 100%; }
   th, td { border: 1px solid #e4e2db; padding: 7px 11px; text-align: left; }
@@ -106,6 +111,11 @@ function createRenderer(headings) {
   const renderer = new Renderer();
   const nextSlug = slugger();
   renderer.html = ({ text }) => escapeHtml(text);
+  renderer.code = function (token) {
+    const language = String(token.lang || "").trim().split(/\s+/, 1)[0].toLowerCase();
+    if (language !== "mermaid") return Renderer.prototype.code.call(this, token);
+    return `<div class="mermaid-diagram mermaid" data-container="Mermaid diagram">${escapeHtml(token.text)}</div>\n`;
+  };
   renderer.link = function (token) {
     const href = safeUrl(token.href);
     if (!href) return this.parser.parseInline(token.tokens);

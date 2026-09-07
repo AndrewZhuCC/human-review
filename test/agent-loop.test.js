@@ -57,7 +57,8 @@ function collect(child) {
   });
 }
 
-const cli = (...args) => spawn(process.execPath, ["src/cli.js", ...args], { cwd: project, env, stdio: ["ignore", "pipe", "pipe"] });
+const cliFrom = (cwd, ...args) => spawn(process.execPath, [path.join(project, "src/cli.js"), ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+const cli = (...args) => cliFrom(project, ...args);
 
 function spawnServer() {
   return spawn(process.execPath, ["src/server-entry.js"], { cwd: project, env, stdio: "ignore" });
@@ -127,6 +128,10 @@ test("status is idle before feedback, waiting after", async () => {
   const parsed = JSON.parse(after.stdout);
   assert.equal(parsed.status, "feedback-waiting");
   assert.equal(parsed.feedback_waiting, true);
+
+  const relative = await collect(cliFrom(project, "status", path.basename(file)));
+  assert.equal(relative.code, 0, relative.stderr);
+  assert.equal(JSON.parse(relative.stdout).feedback_waiting, true, "a known relative target resolves outside the CLI cwd");
 });
 
 test("reply command attaches an agent response to the sent comment", async () => {
@@ -156,24 +161,21 @@ test("reply command rejects a thread outside the latest review", async () => {
   assert.match(result.stderr, /thread is not in the latest sent review/);
 });
 
-test("a restarted server still delivers the sent batch", async () => {
-  await stop(first);
-  // Clear the dead server's record so nothing races against a stale port.
-  fs.rmSync(path.join(process.env.HUMAN_REVIEW_STATE_DIR, "server.json"), { force: true });
+test("a protocol replacement stops the old server and still delivers its persisted batch", async () => {
+  const record = path.join(process.env.HUMAN_REVIEW_STATE_DIR, "server.json");
+  fs.writeFileSync(record, JSON.stringify({ ...server, protocol: SERVER_PROTOCOL - 1 }));
 
-  const second = spawnServer();
+  const result = await collect(cli("poll", file, "--timeout", "10"));
+  assert.equal(result.code, 0, result.stderr);
+  const batch = JSON.parse(result.stdout);
+  assert.equal(batch.status, "feedback");
+  assert.equal(batch.pages[0].comments[0].feedback, "Why does this need to be sharper?");
+
+  const replacement = await waitForServer(server.pid);
+  assert.notEqual(replacement.pid, server.pid, "the mismatched server was replaced rather than left running");
   try {
-    await waitForServer(server.pid);
-    const result = await collect(cli("poll", file, "--timeout", "10"));
-    assert.equal(result.code, 0, result.stderr);
-    const batch = JSON.parse(result.stdout);
-    assert.equal(batch.status, "feedback");
-    assert.equal(batch.pages[0].comments[0].feedback, "Why does this need to be sharper?");
-  } finally {
-    // Kill the server before cleanup deletes its state dir — Windows cannot
-    // remove files a live process still holds open.
-    await stop(second);
-  }
+    process.kill(replacement.pid, "SIGTERM");
+  } catch {}
 });
 
 test.after(async () => {

@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { canonicalTarget, ensureStateDir, SERVER_PROTOCOL, serverPath, statePath, targetKey } from "./paths.js";
+import { canonicalTarget, ensureStateDir, knownTarget, SERVER_PROTOCOL, serverPath, statePath, targetKey } from "./paths.js";
 import { installSkills, shellQuote } from "./setup.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +36,18 @@ function readServerRecord() {
   }
 }
 
+function readState() {
+  try {
+    return JSON.parse(fs.readFileSync(statePath(), "utf8"));
+  } catch {
+    return { pages: {}, batches: {} };
+  }
+}
+
+function commandTarget(input) {
+  return knownTarget(input, readState().pages || {});
+}
+
 function request(server, options, body) {
   const port = typeof server === "number" ? server : server.port;
   const token = typeof server === "number" ? "" : server.token || "";
@@ -63,19 +75,35 @@ function request(server, options, body) {
   });
 }
 
-async function alive(port) {
+async function health(port) {
   try {
     const res = await request(port, { method: "GET", path: "/health", timeout: 1200 });
-    return res.status === 200;
+    return res.status === 200 ? JSON.parse(res.raw) : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+async function alive(port) {
+  return !!(await health(port));
 }
 
 async function ensureServer() {
   ensureStateDir();
   const saved = readServerRecord();
-  if (saved?.protocol === SERVER_PROTOCOL && saved.port && (await alive(saved.port))) return saved;
+  const running = saved?.port ? await health(saved.port) : null;
+  if (saved?.protocol === SERVER_PROTOCOL && running?.protocol === SERVER_PROTOCOL) return saved;
+
+  // A protocol replacement must retire the old process before the new server
+  // owns server.json; otherwise an old browser can strand feedback in stale memory.
+  if (saved?.pid && running?.pid === saved.pid) {
+    try {
+      process.kill(saved.pid, "SIGTERM");
+    } catch {}
+    for (let attempt = 0; attempt < 30 && (await alive(saved.port)); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
 
   const child = spawn(process.execPath, [path.join(here, "server-entry.js")], {
     detached: true,
@@ -188,7 +216,7 @@ function printTimeout(waitedSecs) {
 }
 
 async function pollCommand(input, { ack = false, timeoutSecs = 0 } = {}) {
-  const target = canonicalTarget(input).value;
+  const target = commandTarget(input);
   const server = await ensureServer();
 
   const label = /^https?:\/\//i.test(target) ? target : path.basename(target);
@@ -225,7 +253,7 @@ async function pollCommand(input, { ack = false, timeoutSecs = 0 } = {}) {
  * reports feedback that is waiting for a fresh poll.
  */
 async function replyCommand(input, commentId, message) {
-  const target = canonicalTarget(input).value;
+  const target = commandTarget(input);
   const text = String(message || "").trim();
   if (!commentId) throw new Error("Usage: human-review reply <file-or-localhost-url> <comment-id> --message <text>");
   if (!text) throw new Error("--message cannot be empty");
@@ -249,7 +277,8 @@ async function replyCommand(input, commentId, message) {
 }
 
 async function statusCommand(input) {
-  const target = canonicalTarget(input).value;
+  const data = readState();
+  const target = knownTarget(input, data.pages || {});
   const saved = readServerRecord();
   if (saved?.protocol === SERVER_PROTOCOL && saved.port && (await alive(saved.port))) {
     const res = await request(saved, { method: "GET", path: `/api/status?target=${encodeURIComponent(target)}` });
@@ -259,12 +288,6 @@ async function statusCommand(input) {
     }
   }
 
-  let data = { pages: {}, batches: {} };
-  try {
-    data = JSON.parse(fs.readFileSync(statePath(), "utf8"));
-  } catch {
-    // No state yet: everything below reads as empty.
-  }
   const key = targetKey(target);
   const pending = (data.batches || {})[key];
   const page = (data.pages || {})[key];
