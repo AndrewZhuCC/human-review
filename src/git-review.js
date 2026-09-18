@@ -8,6 +8,7 @@ const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const MAX_FILES = 300;
 const MAX_DIFF_BYTES = 12 * 1024 * 1024;
 const MAX_DIFF_LINES = 30000;
+const MIN_FILE_PREVIEW_LINES = 100;
 const MAX_UNTRACKED_BYTES = 512 * 1024;
 const FULL_CONTEXT_LINES = 999999;
 const FOLD_CONTEXT_AFTER = 8;
@@ -299,30 +300,43 @@ export function collectGitChanges(input) {
     patch = git(repo, ["-c", "core.quotePath=false", "diff", "--find-renames", "--no-color", "--no-ext-diff", "--unified=3", base, "--"]);
     contextTruncated = true;
   }
-  const files = parseUnifiedDiff(patch).slice(0, MAX_FILES);
+  let files = parseUnifiedDiff(patch).slice(0, MAX_FILES);
+  const trackedLines = files.flatMap((file) => file.hunks).reduce((total, hunk) => total + hunk.lines.length, 0);
+  if (!contextTruncated && trackedLines > MAX_DIFF_LINES) {
+    patch = git(repo, ["-c", "core.quotePath=false", "diff", "--find-renames", "--no-color", "--no-ext-diff", "--unified=3", base, "--"]);
+    files = parseUnifiedDiff(patch).slice(0, MAX_FILES);
+    contextTruncated = true;
+  }
   const known = new Set(files.map((entry) => entry.path));
   for (const relative of untrackedFiles(repo)) {
     if (known.has(relative) || files.length >= MAX_FILES) continue;
     const entry = renderUntracked(repo, relative);
     if (entry) files.push(entry);
   }
-  let totalLines = 0;
   let truncated = contextTruncated;
-  for (const file of files) {
-    for (const hunk of file.hunks) {
-      if (totalLines >= MAX_DIFF_LINES) {
-        hunk.lines = [];
-        truncated = true;
-        continue;
-      }
-      const room = MAX_DIFF_LINES - totalLines;
-      if (hunk.lines.length > room) {
-        hunk.lines = hunk.lines.slice(0, room);
-        hunk.lines.push({ type: "meta", text: "… diff truncated …", oldLine: null, newLine: null });
-        truncated = true;
-      }
-      totalLines += hunk.lines.length;
+  const lineCounts = files.map((file) => file.hunks.reduce((total, hunk) => total + hunk.lines.length, 0));
+  if (lineCounts.reduce((total, count) => total + count, 0) > MAX_DIFF_LINES) {
+    const budgets = lineCounts.map((count) => Math.min(count, MIN_FILE_PREVIEW_LINES));
+    let remaining = MAX_DIFF_LINES - budgets.reduce((total, count) => total + count, 0);
+    let pending = budgets.map((budget, index) => (budget < lineCounts[index] ? index : -1)).filter((index) => index >= 0);
+    while (remaining > 0 && pending.length) {
+      const share = Math.max(1, Math.floor(remaining / pending.length));
+      pending = pending.filter((index) => {
+        const extra = Math.min(lineCounts[index] - budgets[index], share, remaining);
+        budgets[index] += extra;
+        remaining -= extra;
+        return budgets[index] < lineCounts[index];
+      });
     }
+    files.forEach((file, index) => {
+      let room = budgets[index];
+      for (const hunk of file.hunks) {
+        if (hunk.lines.length > room) hunk.lines = hunk.lines.slice(0, room);
+        room -= hunk.lines.length;
+      }
+      if (lineCounts[index] > budgets[index]) file.meta.push("… file preview truncated …");
+    });
+    truncated = true;
   }
   const stats = {
     files: files.length,

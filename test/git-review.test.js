@@ -149,6 +149,47 @@ test("collectGitChanges includes tracked, deleted, untracked, binary, and spaced
   assert.ok(changes.stats.deletions >= 3);
 });
 
+test("renderGitReview keeps untracked previews when an earlier diff exhausts the line budget", () => {
+  const repo = fs.mkdtempSync(path.join(tmp, "truncated-repo-"));
+  run(repo, ["init", "-q"]);
+  const original = Array.from({ length: 30010 }, (_, index) => `tracked line ${index + 1}`);
+  fs.writeFileSync(path.join(repo, "large.txt"), `${original.join("\n")}\n`);
+  run(repo, ["add", "large.txt"]);
+  run(repo, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "initial"]);
+  original[15000] = "tracked line changed";
+  fs.writeFileSync(path.join(repo, "large.txt"), `${original.join("\n")}\n`);
+  fs.writeFileSync(path.join(repo, "untracked preview.txt"), "untracked preview content\nsecond line\n");
+
+  const rendered = renderGitReview(repo);
+  const document = new JSDOM(rendered.html).window.document;
+  const preview = document.querySelector('[data-git-path="untracked preview.txt"][data-git-new-line="1"]');
+  assert.ok(preview, "the untracked file retains preview rows after the full-context diff exceeds the budget");
+  assert.match(preview.textContent, /untracked preview content/);
+  assert.match(document.querySelector('[data-git-path="untracked preview.txt"][data-git-new-line="2"]').textContent, /second line/);
+  assert.match(document.querySelector('[data-git-path="large.txt"][data-git-new-line="15001"]').textContent, /tracked line changed/);
+  assert.equal(rendered.stats.truncated, true);
+});
+
+test("collectGitChanges fairly bounds file previews and marks every truncated file", () => {
+  const repo = fs.mkdtempSync(path.join(tmp, "preview-budget-repo-"));
+  run(repo, ["init", "-q"]);
+  for (const name of ["one.txt", "two.txt", "three.txt"]) {
+    const lines = Array.from({ length: 20000 }, (_, index) => `${name} line ${index + 1}`);
+    fs.writeFileSync(path.join(repo, name), `${lines.join("\n")}\n`);
+  }
+
+  const changes = collectGitChanges(repo);
+  assert.equal(changes.stats.truncated, true);
+  const previewLengths = changes.files.map((file) => {
+    const lines = file.hunks.flatMap((hunk) => hunk.lines);
+    assert.ok(lines.length >= 100, `${file.path} keeps a useful preview`);
+    assert.ok(file.meta.includes("… file preview truncated …"), `${file.path} explains its truncation`);
+    return lines.length;
+  });
+  assert.ok(Math.max(...previewLengths) - Math.min(...previewLengths) <= 1, "remaining lines are shared fairly");
+  assert.ok(previewLengths.reduce((total, count) => total + count, 0) <= 30000);
+});
+
 test("renderGitReview folds long unchanged context while keeping hidden lines addressable", () => {
   const repo = fs.mkdtempSync(path.join(tmp, "long-repo-"));
   run(repo, ["init", "-q"]);
